@@ -120,6 +120,9 @@ async function handleMessage(sock, msg) {
       const actionDesc = body.replace('!acao ', '').trim();
       if (!actionDesc) { await reply(sock, msg, '❌ Use: *!acao [descrição da sua ação]*'); return; }
 
+      // Auto-registra jogador se ainda não usou !personagem
+      if (!game.getPlayer(senderId)) game.registerPlayer(senderId, senderName, 'Personagem não definido');
+
       const player = game.getPlayer(senderId);
       const playerLabel = player ? `*${player.name}* _(${player.character})_` : `*${senderName}*`;
       const dc = game.getDifficultyForAction(actionDesc);
