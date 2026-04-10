@@ -13,6 +13,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Banco de dados (arquivos temporários SQLite)
+data/*.db-shm
+data/*.db-wal
+
 # Variáveis de ambiente
 .env
 .env.*
