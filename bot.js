@@ -1,156 +1,132 @@
 require('dotenv').config();
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
 const GameManager = require('./gameManager');
 const { rollD20, formatDiceResult } = require('./dice');
 const narratives = require('./narratives');
 const { generateActionNarrative, generateTurnNarrative } = require('./ai/claude');
-const { waState } = require('./whatsapp/state');
+const { startWhatsApp } = require('./whatsapp/client');
 const { startServer } = require('./api/server');
 
-const client = new Client({
-  authStrategy: new LocalAuth({ clientId: 'rpg-cyberpunk-bot' }),
-  puppeteer: {
-    headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
-  }
-});
+const games = new Map(); // groupId -> GameManager
 
-const games = new Map(); // groupId -> GameManager instance
+// ─── Helpers ────────────────────────────────────────────────────────────────
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// ─── QR Code ───────────────────────────────────────────────────────────────
-client.on('qr', (qr) => {
-  waState.status = 'qr';
-  waState.qr = qr;
-  console.log('\n📱 Escaneie o QR code abaixo com o WhatsApp:\n');
-  qrcode.generate(qr, { small: true });
-});
+function getBody(msg) {
+  return (
+    msg.message?.conversation ||
+    msg.message?.extendedTextMessage?.text ||
+    ''
+  ).trim();
+}
 
-client.on('ready', () => {
-  waState.status = 'connected';
-  waState.qr = null;
-  console.log('✅ Bot CampanhaCyberpunk conectado e pronto!');
-  console.log('📡 Aguardando comandos no grupo...\n');
-});
+function getJid(msg) { return msg.key.remoteJid; }
+function isGroup(msg) { return getJid(msg).endsWith('@g.us'); }
 
-client.on('auth_failure', () => {
-  waState.status = 'disconnected';
-  console.error('❌ Falha na autenticação. Delete a pasta .wwebjs_auth e tente novamente.');
-});
+function getSenderName(msg) {
+  return msg.pushName || msg.key.participant?.split('@')[0] || msg.key.remoteJid.split('@')[0];
+}
 
-// ─── Helper: guarda de Mestre ─────────────────────────────────────────────
-function replyIfNotGM(game, msg, commandName) {
+function getSenderId(msg) {
+  // In groups, participant is the sender; in DMs, remoteJid
+  return msg.key.participant || msg.key.remoteJid;
+}
+
+async function send(sock, jid, text) {
+  await sock.sendMessage(jid, { text });
+}
+
+async function reply(sock, msg, text) {
+  await sock.sendMessage(getJid(msg), { text }, { quoted: msg });
+}
+
+function replyIfNotGM(game, sock, msg, commandName) {
   if (!game.gmId) {
-    msg.reply(`⚠️ Nenhum Mestre foi definido ainda. Use *!mestre* para assumir o papel.`);
+    reply(sock, msg, `⚠️ Nenhum Mestre foi definido ainda. Use *!mestre* para assumir o papel.`);
     return true;
   }
-  if (!game.isGM(msg.from)) {
-    msg.reply(`🚫 Apenas o *Mestre* pode usar *${commandName}*.`);
+  if (!game.isGM(getSenderId(msg))) {
+    reply(sock, msg, `🚫 Apenas o *Mestre* pode usar *${commandName}*.`);
     return true;
   }
   return false;
 }
 
-// ─── Processamento de Mensagens ─────────────────────────────────────────────
-client.on('message', async (msg) => {
-  const chat = await msg.getChat();
+// ─── Handler de mensagens ────────────────────────────────────────────────────
+async function handleMessage(sock, msg) {
+  const jid = getJid(msg);
+  const body = getBody(msg);
+  if (!body) return;
 
-  // Só processa mensagens de grupo
-  if (!chat.isGroup) {
-    if (msg.body === '!ajuda') {
-      await msg.reply(narratives.helpPrivate);
-    }
+  // DM: só responde !ajuda
+  if (!isGroup(msg)) {
+    if (body === '!ajuda') await send(sock, jid, narratives.helpPrivate);
     return;
   }
 
-  const groupId = chat.id._serialized;
-  const senderName = msg._data.notifyName || msg.from;
-  const body = msg.body.trim();
+  const senderName = getSenderName(msg);
+  const senderId = getSenderId(msg);
 
-  // Inicializa o jogo para o grupo se não existir
-  if (!games.has(groupId)) {
-    games.set(groupId, new GameManager(groupId));
-  }
-  const game = games.get(groupId);
+  if (!games.has(jid)) games.set(jid, new GameManager(jid));
+  const game = games.get(jid);
 
-  // ─── Comandos ──────────────────────────────────────────────────────────────
   try {
 
-    // !mestre — reivindica papel de Game Master
     if (body === '!mestre') {
-      const result = game.claimGM(msg.from);
+      const result = game.claimGM(senderId);
       if (result.success) {
-        await chat.sendMessage(
+        await send(sock, jid,
           `🎭 *${senderName}* assumiu o papel de *MESTRE* desta campanha!\n\n` +
           `_Apenas o Mestre pode usar: !iniciar, !encerrar, !turno, !cena, !definirDC, !criarNPC, !acaoNPC_`
         );
       } else if (result.self) {
-        await msg.reply(`ℹ️ Você já é o Mestre desta campanha.`);
+        await reply(sock, msg, `ℹ️ Você já é o Mestre desta campanha.`);
       } else {
-        await msg.reply(`🚫 Já existe um Mestre nesta campanha.`);
+        await reply(sock, msg, `🚫 Já existe um Mestre nesta campanha.`);
       }
       return;
     }
 
-    // !iniciar — inicia a campanha (apenas Mestre)
     if (body === '!iniciar') {
-      if (replyIfNotGM(game, msg, '!iniciar')) return;
-      if (game.started) {
-        await chat.sendMessage('⚠️ A campanha já está em andamento! Use *!status* para ver o turno atual.');
-        return;
-      }
+      if (replyIfNotGM(game, sock, msg, '!iniciar')) return;
+      if (game.started) { await send(sock, jid, '⚠️ A campanha já está em andamento! Use *!status* para ver o turno atual.'); return; }
       game.start();
-      await chat.sendMessage(narratives.intro);
+      await send(sock, jid, narratives.intro);
       await sleep(1500);
-      await chat.sendMessage(narratives.turn1Opening);
+      await send(sock, jid, narratives.turn1Opening);
       return;
     }
 
-    // !personagem [descrição] — registra ou atualiza personagem do jogador
     if (body.startsWith('!personagem ')) {
       const desc = body.replace('!personagem ', '').trim();
-      if (!desc) {
-        await msg.reply('❌ Use: *!personagem [descrição do seu personagem]*');
-        return;
-      }
-      game.registerPlayer(msg.from, senderName, desc);
-      const count = game.playerCount();
-      await chat.sendMessage(
+      if (!desc) { await reply(sock, msg, '❌ Use: *!personagem [descrição do seu personagem]*'); return; }
+      game.registerPlayer(senderId, senderName, desc);
+      await send(sock, jid,
         `🟢 *${senderName}* entrou na campanha!\n\n` +
         `📋 *Personagem:* ${desc}\n\n` +
-        `👥 Jogadores registrados: ${count}\n\n` +
+        `👥 Jogadores registrados: ${game.playerCount()}\n\n` +
         `_Quando todos estiverem prontos, o Mestre digita *!iniciar*_`
       );
       return;
     }
 
-    // !d20 — rola dado livremente
     if (body === '!d20') {
       const result = rollD20();
-      await chat.sendMessage(formatDiceResult(senderName, result, null));
+      await send(sock, jid, formatDiceResult(senderName, result, null));
       return;
     }
 
-    // !acao [descrição] — declara ação e rola dado automaticamente
     if (body.startsWith('!acao ')) {
-      if (!game.started) {
-        await msg.reply('⚠️ A campanha ainda não foi iniciada. O Mestre deve usar *!iniciar*.');
-        return;
-      }
+      if (!game.started) { await reply(sock, msg, '⚠️ A campanha ainda não foi iniciada. O Mestre deve usar *!iniciar*.'); return; }
       const actionDesc = body.replace('!acao ', '').trim();
-      if (!actionDesc) {
-        await msg.reply('❌ Use: *!acao [descrição da sua ação]*');
-        return;
-      }
+      if (!actionDesc) { await reply(sock, msg, '❌ Use: *!acao [descrição da sua ação]*'); return; }
 
-      const player = game.getPlayer(msg.from);
+      const player = game.getPlayer(senderId);
       const playerLabel = player ? `*${player.name}* _(${player.character})_` : `*${senderName}*`;
-
       const dc = game.getDifficultyForAction(actionDesc);
       const result = rollD20();
-      game.logAction(msg.from, senderName, actionDesc, result, dc);
+      game.logAction(senderId, senderName, actionDesc, result, dc);
 
-      await chat.sendMessage(
+      await send(sock, jid,
         `⚡ *AÇÃO DECLARADA*\n\n` +
         `👤 Jogador: ${playerLabel}\n` +
         `🎯 Ação: _${actionDesc}_\n` +
@@ -158,20 +134,15 @@ client.on('message', async (msg) => {
         formatDiceResult(senderName, result, dc)
       );
 
-      // Narrativa gerada pelo Claude
       await sleep(500);
-      const recentActions = game.actionLog
-        .filter(a => a.turn === game.turn)
-        .slice(-3)
-        .map(a => `${a.name}: ${a.action}`);
+      const recentActions = game.actionLog.filter(a => a.turn === game.turn).slice(-3).map(a => `${a.name}: ${a.action}`);
       const narrative = await generateActionNarrative(senderName, actionDesc, result, dc, game.turn, recentActions);
-      await chat.sendMessage(`🎭 *[MESTRE]:* ${narrative}`);
+      await send(sock, jid, `🎭 *[MESTRE]:* ${narrative}`);
 
-      // Verifica se todos os jogadores já agiram neste turno
-      const actedResult = game.markActed(msg.from);
+      const actedResult = game.markActed(senderId);
       if (actedResult.allActed) {
         await sleep(500);
-        await chat.sendMessage(
+        await send(sock, jid,
           `\n⚔️ *TODOS OS JOGADORES AGIRAM — TURNO ${game.turn}*\n\n` +
           `🎭 *[MESTRE]:* É hora das reações dos NPCs.\n` +
           `Use *!acaoNPC [nome] | [ação]* para declarar as ações dos personagens.\n` +
@@ -183,20 +154,16 @@ client.on('message', async (msg) => {
       return;
     }
 
-    // !turno — avança para o próximo turno (apenas Mestre)
     if (body === '!turno') {
-      if (replyIfNotGM(game, msg, '!turno')) return;
-      if (!game.started) {
-        await msg.reply('⚠️ A campanha ainda não foi iniciada.');
-        return;
-      }
+      if (replyIfNotGM(game, sock, msg, '!turno')) return;
+      if (!game.started) { await reply(sock, msg, '⚠️ A campanha ainda não foi iniciada.'); return; }
       game.nextTurn();
       const lastTurnSummary = game.actionLog
         .filter(a => a.turn === game.turn - 1)
         .map(a => `${a.name} ${a.success ? 'teve sucesso em' : 'falhou em'}: ${a.action}`)
         .join('; ');
       const turnNarrative = await generateTurnNarrative(game.turn, lastTurnSummary);
-      await chat.sendMessage(
+      await send(sock, jid,
         `\n━━━━━━━━━━━━━━━━━━━━━━\n` +
         `⏱️ *TURNO ${game.turn} — INICIADO*\n` +
         `━━━━━━━━━━━━━━━━━━━━━━\n\n` +
@@ -206,148 +173,89 @@ client.on('message', async (msg) => {
       return;
     }
 
-    // !definirDC [número] — GM define DC para a próxima ação
     if (body.startsWith('!definirDC ')) {
-      if (replyIfNotGM(game, msg, '!definirDC')) return;
-      const dcStr = body.replace('!definirDC ', '').trim();
-      const dc = parseInt(dcStr, 10);
-      if (isNaN(dc) || dc < 1 || dc > 20) {
-        await msg.reply('❌ Use: *!definirDC [número entre 1 e 20]*');
-        return;
-      }
+      if (replyIfNotGM(game, sock, msg, '!definirDC')) return;
+      const dc = parseInt(body.replace('!definirDC ', '').trim(), 10);
+      if (isNaN(dc) || dc < 1 || dc > 20) { await reply(sock, msg, '❌ Use: *!definirDC [número entre 1 e 20]*'); return; }
       game.setCustomDC(dc);
-      await chat.sendMessage(
-        `🔒 *[MESTRE definiu a dificuldade]*\n\n` +
-        `A próxima ação declarada terá *DC ${dc}*.\n` +
-        `_Use !acao normalmente._`
-      );
+      await send(sock, jid, `🔒 *[MESTRE definiu a dificuldade]*\n\nA próxima ação declarada terá *DC ${dc}*.\n_Use !acao normalmente._`);
       return;
     }
 
-    // !criarNPC nome | tipo | descrição | motivação — GM cria NPC dinâmico
     if (body.startsWith('!criarNPC ')) {
-      if (replyIfNotGM(game, msg, '!criarNPC')) return;
+      if (replyIfNotGM(game, sock, msg, '!criarNPC')) return;
       const parts = body.replace('!criarNPC ', '').split('|').map(s => s.trim());
-      if (parts.length < 4) {
-        await msg.reply('❌ Use: *!criarNPC [nome] | [tipo] | [descrição] | [motivação]*');
-        return;
-      }
+      if (parts.length < 4) { await reply(sock, msg, '❌ Use: *!criarNPC [nome] | [tipo] | [descrição] | [motivação]*'); return; }
       const [name, type, desc, motivation] = parts;
       const npc = game.createNPC(name, type, desc, motivation);
-      await chat.sendMessage(
+      await send(sock, jid,
         `🤖 *[NOVO PERSONAGEM INSERIDO NA CENA — TURNO ${game.turn}]*\n\n` +
-        `👤 *Nome:* ${npc.name}\n` +
-        `🏷️ *Tipo:* ${npc.type}\n` +
-        `📝 *Descrição:* ${npc.desc}\n` +
-        `⚠️ *Motivação:* ${npc.motivation}`
+        `👤 *Nome:* ${npc.name}\n🏷️ *Tipo:* ${npc.type}\n📝 *Descrição:* ${npc.desc}\n⚠️ *Motivação:* ${npc.motivation}`
       );
       return;
     }
 
-    // !acaoNPC nome | ação — GM declara ação de NPC no turno
     if (body.startsWith('!acaoNPC ')) {
-      if (replyIfNotGM(game, msg, '!acaoNPC')) return;
+      if (replyIfNotGM(game, sock, msg, '!acaoNPC')) return;
       const parts = body.replace('!acaoNPC ', '').split('|').map(s => s.trim());
-      if (parts.length < 2) {
-        await msg.reply('❌ Use: *!acaoNPC [nome do NPC] | [descrição da ação]*');
-        return;
-      }
+      if (parts.length < 2) { await reply(sock, msg, '❌ Use: *!acaoNPC [nome do NPC] | [descrição da ação]*'); return; }
       const [npcName, action] = parts;
       game.logNPCAction(npcName, action);
-      await chat.sendMessage(narratives.getNPCActionMessage(npcName, action));
+      await send(sock, jid, narratives.getNPCActionMessage(npcName, action));
       return;
     }
 
-    // !npc — apresenta um NPC na cena (estático ou dinâmico)
     if (body === '!npc') {
       const dynamic = game.dynamicNpcs;
-      let npc;
-      if (dynamic.length > 0) {
-        // NPCs dinâmicos têm peso 2x, estáticos peso 1x
-        const pool = [...dynamic, ...dynamic, narratives.getNPCFromStatic()];
-        npc = pool[Math.floor(Math.random() * pool.length)];
-      } else {
-        npc = narratives.getRandomNPC();
-      }
-      await chat.sendMessage(
+      const npc = dynamic.length > 0
+        ? [...dynamic, ...dynamic, narratives.getNPCFromStatic()][Math.floor(Math.random() * (dynamic.length * 2 + 1))]
+        : narratives.getRandomNPC();
+      await send(sock, jid,
         `🤖 *[PERSONAGEM NA CENA]*\n\n` +
-        `👤 *Nome:* ${npc.name}\n` +
-        `🏷️ *Tipo:* ${npc.type}\n` +
-        `📝 *Descrição:* ${npc.desc}\n` +
-        `⚠️ *Motivação:* ${npc.motivation}` +
+        `👤 *Nome:* ${npc.name}\n🏷️ *Tipo:* ${npc.type}\n📝 *Descrição:* ${npc.desc}\n⚠️ *Motivação:* ${npc.motivation}` +
         (npc.createdAtTurn !== undefined ? `\n\n_Introduzido no Turno ${npc.createdAtTurn}_` : '')
       );
       return;
     }
 
-    // !npcs — lista NPCs criados pelo Mestre
     if (body === '!npcs') {
       const dynamic = game.dynamicNpcs;
-      if (dynamic.length === 0) {
-        await msg.reply('ℹ️ Nenhum NPC foi criado pelo Mestre ainda nesta campanha.\n\n_Use *!npc* para ver os personagens da história._');
-        return;
-      }
+      if (dynamic.length === 0) { await reply(sock, msg, 'ℹ️ Nenhum NPC foi criado pelo Mestre ainda.\n\n_Use *!npc* para ver os personagens da história._'); return; }
       let text = `🤖 *NPCs ATIVOS NA CAMPANHA*\n\n`;
       dynamic.forEach((npc, i) => {
-        text += `*${i + 1}. ${npc.name}* _(${npc.type})_\n`;
-        text += `   📝 ${npc.desc}\n`;
-        text += `   ⚠️ ${npc.motivation}\n`;
-        text += `   _Introduzido no Turno ${npc.createdAtTurn}_\n\n`;
+        text += `*${i + 1}. ${npc.name}* _(${npc.type})_\n   📝 ${npc.desc}\n   ⚠️ ${npc.motivation}\n   _Turno ${npc.createdAtTurn}_\n\n`;
       });
-      await chat.sendMessage(text.trim());
+      await send(sock, jid, text.trim());
       return;
     }
 
-    // !status — mostra estado atual da campanha
-    if (body === '!status') {
-      await chat.sendMessage(game.getStatusMessage());
-      return;
-    }
+    if (body === '!status') { await send(sock, jid, game.getStatusMessage()); return; }
+    if (body === '!jogadores') { await send(sock, jid, game.getPlayersMessage()); return; }
 
-    // !jogadores — lista jogadores registrados
-    if (body === '!jogadores') {
-      await chat.sendMessage(game.getPlayersMessage());
-      return;
-    }
-
-    // !encerrar — encerra a campanha (apenas Mestre)
     if (body === '!encerrar') {
-      if (replyIfNotGM(game, msg, '!encerrar')) return;
+      if (replyIfNotGM(game, sock, msg, '!encerrar')) return;
       game.end();
-      await chat.sendMessage(narratives.outro);
+      await send(sock, jid, narratives.outro);
       return;
     }
 
-    // !ajuda — lista de comandos
-    if (body === '!ajuda') {
-      await chat.sendMessage(narratives.help);
-      return;
-    }
+    if (body === '!ajuda') { await send(sock, jid, narratives.help); return; }
 
-    // !cena — descreve a cena atual (apenas Mestre)
     if (body === '!cena') {
-      if (replyIfNotGM(game, msg, '!cena')) return;
-      const lastTurnSummary = game.actionLog
-        .filter(a => a.turn === game.turn)
-        .map(a => `${a.name}: ${a.action}`)
-        .join('; ');
+      if (replyIfNotGM(game, sock, msg, '!cena')) return;
+      const lastTurnSummary = game.actionLog.filter(a => a.turn === game.turn).map(a => `${a.name}: ${a.action}`).join('; ');
       const scene = await generateTurnNarrative(game.turn, lastTurnSummary);
-      await chat.sendMessage(`🌆 *[CENA ATUAL — TURNO ${game.turn}]*\n\n${scene}`);
+      await send(sock, jid, `🌆 *[CENA ATUAL — TURNO ${game.turn}]*\n\n${scene}`);
       return;
     }
 
   } catch (err) {
     console.error('Erro ao processar mensagem:', err);
-    await msg.reply('❌ Ocorreu um erro interno. Tente novamente.');
+    await reply(sock, msg, '❌ Ocorreu um erro interno. Tente novamente.');
   }
-});
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
-function sleep(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 // ─── Inicialização ──────────────────────────────────────────────────────────
 console.log('🚀 Iniciando bot CampanhaCyberpunk...');
 startServer();
-client.initialize();
+startWhatsApp(handleMessage);

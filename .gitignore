@@ -1,7 +1,8 @@
 # Dependências
 node_modules/
 
-# Sessão WhatsApp (gerada pelo whatsapp-web.js)
+# Sessão WhatsApp
+.auth/
 .wwebjs_auth/
 .wwebjs_cache/
 
