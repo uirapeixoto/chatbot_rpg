@@ -1,0 +1,9 @@
+{
+  "name": "RPG Bot Admin",
+  "short_name": "RPG Admin",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#7c3aed",
+  "background_color": "#0d0d1a",
+  "icons": []
+}

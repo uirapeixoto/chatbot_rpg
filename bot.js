@@ -5,6 +5,8 @@ const GameManager = require('./gameManager');
 const { rollD20, formatDiceResult } = require('./dice');
 const narratives = require('./narratives');
 const { generateActionNarrative, generateTurnNarrative } = require('./ai/claude');
+const { waState } = require('./whatsapp/state');
+const { startServer } = require('./api/server');
 
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: 'rpg-cyberpunk-bot' }),
@@ -18,16 +20,21 @@ const games = new Map(); // groupId -> GameManager instance
 
 // ─── QR Code ───────────────────────────────────────────────────────────────
 client.on('qr', (qr) => {
+  waState.status = 'qr';
+  waState.qr = qr;
   console.log('\n📱 Escaneie o QR code abaixo com o WhatsApp:\n');
   qrcode.generate(qr, { small: true });
 });
 
 client.on('ready', () => {
+  waState.status = 'connected';
+  waState.qr = null;
   console.log('✅ Bot CampanhaCyberpunk conectado e pronto!');
   console.log('📡 Aguardando comandos no grupo...\n');
 });
 
 client.on('auth_failure', () => {
+  waState.status = 'disconnected';
   console.error('❌ Falha na autenticação. Delete a pasta .wwebjs_auth e tente novamente.');
 });
 
@@ -342,4 +349,5 @@ function sleep(ms) {
 
 // ─── Inicialização ──────────────────────────────────────────────────────────
 console.log('🚀 Iniciando bot CampanhaCyberpunk...');
+startServer();
 client.initialize();
