@@ -1,8 +1,10 @@
+require('dotenv').config();
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const GameManager = require('./gameManager');
 const { rollD20, formatDiceResult } = require('./dice');
 const narratives = require('./narratives');
+const { generateActionNarrative, generateTurnNarrative } = require('./ai/claude');
 
 const client = new Client({
   authStrategy: new LocalAuth({ clientId: 'rpg-cyberpunk-bot' }),
@@ -149,13 +151,14 @@ client.on('message', async (msg) => {
         formatDiceResult(senderName, result, dc)
       );
 
-      // Narrativa automática após ação
-      await sleep(1000);
-      const margin = result - dc;
-      const narrative = narratives.getActionNarrative(actionDesc, result, dc, margin);
-      if (narrative) {
-        await chat.sendMessage(`🎭 *[MESTRE]:* ${narrative}`);
-      }
+      // Narrativa gerada pelo Claude
+      await sleep(500);
+      const recentActions = game.actionLog
+        .filter(a => a.turn === game.turn)
+        .slice(-3)
+        .map(a => `${a.name}: ${a.action}`);
+      const narrative = await generateActionNarrative(senderName, actionDesc, result, dc, game.turn, recentActions);
+      await chat.sendMessage(`🎭 *[MESTRE]:* ${narrative}`);
 
       // Verifica se todos os jogadores já agiram neste turno
       const actedResult = game.markActed(msg.from);
@@ -181,7 +184,11 @@ client.on('message', async (msg) => {
         return;
       }
       game.nextTurn();
-      const turnNarrative = narratives.getTurnNarrative(game.turn);
+      const lastTurnSummary = game.actionLog
+        .filter(a => a.turn === game.turn - 1)
+        .map(a => `${a.name} ${a.success ? 'teve sucesso em' : 'falhou em'}: ${a.action}`)
+        .join('; ');
+      const turnNarrative = await generateTurnNarrative(game.turn, lastTurnSummary);
       await chat.sendMessage(
         `\n━━━━━━━━━━━━━━━━━━━━━━\n` +
         `⏱️ *TURNO ${game.turn} — INICIADO*\n` +
@@ -313,7 +320,11 @@ client.on('message', async (msg) => {
     // !cena — descreve a cena atual (apenas Mestre)
     if (body === '!cena') {
       if (replyIfNotGM(game, msg, '!cena')) return;
-      const scene = narratives.getSceneDescription(game.turn);
+      const lastTurnSummary = game.actionLog
+        .filter(a => a.turn === game.turn)
+        .map(a => `${a.name}: ${a.action}`)
+        .join('; ');
+      const scene = await generateTurnNarrative(game.turn, lastTurnSummary);
       await chat.sendMessage(`🌆 *[CENA ATUAL — TURNO ${game.turn}]*\n\n${scene}`);
       return;
     }
