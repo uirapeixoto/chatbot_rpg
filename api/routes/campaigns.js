@@ -13,10 +13,7 @@ router.get('/', (req, res) => {
 router.post('/', (req, res) => {
   const { name, jid, theme, prompt, context_data } = req.body ?? {};
   if (!name?.trim()) return res.status(400).json({ error: 'Nome é obrigatório' });
-  const cleanJid = jid?.trim() || null;
-  if (cleanJid && !cleanJid.includes('@')) {
-    return res.status(400).json({ error: 'JID inválido. Use o comando !jid no grupo WhatsApp para obter o ID correto (formato: 120363...@g.us)' });
-  }
+  const cleanJid = (jid?.trim() && jid.includes('@')) ? jid.trim() : null;
   try {
     const result = db.prepare(
       'INSERT INTO campaigns (name, jid, theme, prompt, context_data) VALUES (?, ?, ?, ?, ?)'
@@ -43,10 +40,7 @@ router.put('/:id', (req, res) => {
   if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada' });
   const { name, jid, theme, prompt, context_data, active } = req.body ?? {};
   const cleanName = name?.trim() || campaign.name;
-  const cleanJid = jid?.trim() || null;
-  if (cleanJid && !cleanJid.includes('@')) {
-    return res.status(400).json({ error: 'JID inválido. Use !jid no grupo para obter o formato correto (120363...@g.us)' });
-  }
+  const cleanJid = (jid?.trim() && jid.includes('@')) ? jid.trim() : null;
   try {
     db.prepare(`UPDATE campaigns SET name=?, jid=?, theme=?, prompt=?, context_data=?, active=? WHERE id=?`)
       .run(cleanName, cleanJid, theme ?? campaign.theme, prompt ?? campaign.prompt, context_data ?? campaign.context_data, active ?? campaign.active, req.params.id);
