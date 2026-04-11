@@ -52,6 +52,9 @@ db.exec(`
 // Migrações (colunas adicionadas em versões posteriores)
 try { db.exec('ALTER TABLE conversations ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id)'); } catch (_) {}
 
+// Corrige JIDs inválidos (sem @) que possam ter sido inseridos por seed incorreto
+db.prepare("UPDATE campaigns SET jid = NULL WHERE jid IS NOT NULL AND jid NOT LIKE '%@%'").run();
+
 const configExists = db.prepare("SELECT id FROM campaigns WHERE name = 'CampanhaCyberpunk'").get();
 if (!configExists) {
   db.prepare(`INSERT INTO campaigns (name, jid, theme, prompt, context_data, active) VALUES (?, ?, ?, ?, ?, 1)`)
