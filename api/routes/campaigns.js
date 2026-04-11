@@ -39,19 +39,17 @@ router.get('/:id', (req, res) => {
 
 // Atualizar campanha
 router.put('/:id', (req, res) => {
-  const campaign = db.prepare('SELECT id FROM campaigns WHERE id = ?').get(req.params.id);
+  const campaign = db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id);
   if (!campaign) return res.status(404).json({ error: 'Campanha não encontrada' });
   const { name, jid, theme, prompt, context_data, active } = req.body ?? {};
-  if (!name?.trim()) return res.status(400).json({ error: 'Nome é obrigatório' });
+  const cleanName = name?.trim() || campaign.name;
   const cleanJid = jid?.trim() || null;
   if (cleanJid && !cleanJid.includes('@')) {
-    return res.status(400).json({ error: 'JID inválido. Use o comando !jid no grupo WhatsApp para obter o ID correto (formato: 120363...@g.us)' });
+    return res.status(400).json({ error: 'JID inválido. Use !jid no grupo para obter o formato correto (120363...@g.us)' });
   }
   try {
-    db.prepare(`
-      UPDATE campaigns SET name=?, jid=?, theme=?, prompt=?, context_data=?, active=?
-      WHERE id=?
-    `).run(name.trim(), cleanJid, theme ?? '', prompt ?? '', context_data ?? '', active ?? 1, req.params.id);
+    db.prepare(`UPDATE campaigns SET name=?, jid=?, theme=?, prompt=?, context_data=?, active=? WHERE id=?`)
+      .run(cleanName, cleanJid, theme ?? campaign.theme, prompt ?? campaign.prompt, context_data ?? campaign.context_data, active ?? campaign.active, req.params.id);
     res.json(db.prepare('SELECT * FROM campaigns WHERE id = ?').get(req.params.id));
   } catch (err) {
     if (err.code === 'SQLITE_CONSTRAINT_UNIQUE') {
