@@ -15,6 +15,26 @@ function getCampaignForJid(jid) {
   ).get(jid) || null;
 }
 
+async function getCampaignForGroup(sock, jid) {
+  // 1. Tenta por JID exato
+  const byJid = getCampaignForJid(jid);
+  if (byJid) return byJid;
+
+  // 2. Fallback: busca pelo nome do grupo
+  try {
+    const meta = await sock.groupMetadata(jid);
+    const groupName = (meta?.subject || '').trim();
+    if (groupName) {
+      const byName = db.prepare(
+        'SELECT * FROM campaigns WHERE lower(trim(name)) = lower(trim(?)) AND active = 1'
+      ).get(groupName);
+      if (byName) return byName;
+    }
+  } catch (_) {}
+
+  return null;
+}
+
 function getNarrativesForTheme(theme) {
   const t = (theme || '').toLowerCase();
   if (t.includes('medieval') || t.includes('tolkien') || t.includes('fantasia')) {
@@ -72,7 +92,7 @@ async function handleMessage(sock, msg) {
   const body = getBody(msg);
   if (!body) return;
 
-  const campaign = getCampaignForJid(jid);
+  const campaign = await getCampaignForGroup(sock, jid);
   const nar = getNarrativesForTheme(campaign?.theme);
   const campaignPrompt = campaign?.prompt || null;
 
