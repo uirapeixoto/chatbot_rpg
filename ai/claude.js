@@ -18,7 +18,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
  * @param {string[]} recentActions - Últimas ações do turno para contexto
  * @returns {Promise<string>}
  */
-async function generateActionNarrative(playerName, action, roll, dc, turn, recentActions = []) {
+async function generateActionNarrative(playerName, action, roll, dc, turn, recentActions = [], systemPrompt = null) {
   const margin = roll - dc;
   const outcome =
     roll === 20 ? 'ACERTO CRÍTICO (D20=20)' :
@@ -40,7 +40,7 @@ async function generateActionNarrative(playerName, action, roll, dc, turn, recen
     const res = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 300,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt || SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
     });
     return res.content[0].text.trim();
@@ -60,14 +60,14 @@ async function generateActionNarrative(playerName, action, roll, dc, turn, recen
  * @param {string} lastTurnSummary - Resumo do turno anterior
  * @returns {Promise<string>}
  */
-async function generateTurnNarrative(turn, lastTurnSummary = '') {
+async function generateTurnNarrative(turn, lastTurnSummary = '', systemPrompt = null) {
   const context = lastTurnSummary
     ? `Resumo do turno anterior: ${lastTurnSummary}`
     : 'É o início da missão.';
 
   const userMessage =
     `${context}\n\n` +
-    `Narre a abertura do Turno ${turn} da missão no Armazém 9-Delta. ` +
+    `Narre a abertura do Turno ${turn}. ` +
     `Descreva o ambiente, a tensão e o que os jogadores percebem ao redor. ` +
     `Termine convidando-os a declarar suas ações.`;
 
@@ -75,7 +75,7 @@ async function generateTurnNarrative(turn, lastTurnSummary = '') {
     const res = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 400,
-      system: SYSTEM_PROMPT,
+      system: systemPrompt || SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
     });
     return res.content[0].text.trim();

@@ -1,12 +1,27 @@
 require('dotenv').config();
 const GameManager = require('./gameManager');
 const { rollD20, formatDiceResult } = require('./dice');
-const narratives = require('./narratives');
 const { generateActionNarrative, generateTurnNarrative } = require('./ai/claude');
 const { startWhatsApp } = require('./whatsapp/client');
 const { startServer } = require('./api/server');
+const { db } = require('./db/database');
 
 const games = new Map(); // groupId -> GameManager
+
+// ─── Campaign routing ────────────────────────────────────────────────────────
+function getCampaignForJid(jid) {
+  return db.prepare(
+    'SELECT * FROM campaigns WHERE lower(trim(jid)) = lower(trim(?)) AND active = 1'
+  ).get(jid) || null;
+}
+
+function getNarrativesForTheme(theme) {
+  const t = (theme || '').toLowerCase();
+  if (t.includes('medieval') || t.includes('tolkien') || t.includes('fantasia')) {
+    return require('./narratives-medieval');
+  }
+  return require('./narratives');
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -57,9 +72,13 @@ async function handleMessage(sock, msg) {
   const body = getBody(msg);
   if (!body) return;
 
+  const campaign = getCampaignForJid(jid);
+  const nar = getNarrativesForTheme(campaign?.theme);
+  const campaignPrompt = campaign?.prompt || null;
+
   // DM: só responde !ajuda
   if (!isGroup(msg)) {
-    if (body === '!ajuda') await send(sock, jid, narratives.helpPrivate);
+    if (body === '!ajuda') await send(sock, jid, nar.helpPrivate);
     return;
   }
 
@@ -70,6 +89,16 @@ async function handleMessage(sock, msg) {
   const game = games.get(jid);
 
   try {
+
+    if (body === '!jid') {
+      const campInfo = campaign
+        ? `\n🗡️ Campanha vinculada: *${campaign.name}*`
+        : '\n⚠️ Nenhuma campanha vinculada a este grupo no painel admin.';
+      await reply(sock, msg,
+        `📋 *JID deste grupo:*\n\`${jid}\`${campInfo}\n\n_Copie o JID acima e cole no painel admin → Configurações da campanha._`
+      );
+      return;
+    }
 
     if (body === '!mestre') {
       const result = game.claimGM(senderId);
@@ -90,9 +119,9 @@ async function handleMessage(sock, msg) {
       if (replyIfNotGM(game, sock, msg, '!iniciar')) return;
       if (game.started) { await send(sock, jid, '⚠️ A campanha já está em andamento! Use *!status* para ver o turno atual.'); return; }
       game.start();
-      await send(sock, jid, narratives.intro);
+      await send(sock, jid, nar.intro);
       await sleep(1500);
-      await send(sock, jid, narratives.turn1Opening);
+      await send(sock, jid, nar.turn1Opening);
       return;
     }
 
@@ -139,7 +168,7 @@ async function handleMessage(sock, msg) {
 
       await sleep(500);
       const recentActions = game.actionLog.filter(a => a.turn === game.turn).slice(-3).map(a => `${a.name}: ${a.action}`);
-      const narrative = await generateActionNarrative(senderName, actionDesc, result, dc, game.turn, recentActions);
+      const narrative = await generateActionNarrative(senderName, actionDesc, result, dc, game.turn, recentActions, campaignPrompt);
       await send(sock, jid, `🎭 *[MESTRE]:* ${narrative}`);
 
       const actedResult = game.markActed(senderId);
@@ -165,7 +194,7 @@ async function handleMessage(sock, msg) {
         .filter(a => a.turn === game.turn - 1)
         .map(a => `${a.name} ${a.success ? 'teve sucesso em' : 'falhou em'}: ${a.action}`)
         .join('; ');
-      const turnNarrative = await generateTurnNarrative(game.turn, lastTurnSummary);
+      const turnNarrative = await generateTurnNarrative(game.turn, lastTurnSummary, campaignPrompt);
       await send(sock, jid,
         `\n━━━━━━━━━━━━━━━━━━━━━━\n` +
         `⏱️ *TURNO ${game.turn} — INICIADO*\n` +
@@ -204,15 +233,15 @@ async function handleMessage(sock, msg) {
       if (parts.length < 2) { await reply(sock, msg, '❌ Use: *!acaoNPC [nome do NPC] | [descrição da ação]*'); return; }
       const [npcName, action] = parts;
       game.logNPCAction(npcName, action);
-      await send(sock, jid, narratives.getNPCActionMessage(npcName, action));
+      await send(sock, jid, nar.getNPCActionMessage(npcName, action));
       return;
     }
 
     if (body === '!npc') {
       const dynamic = game.dynamicNpcs;
       const npc = dynamic.length > 0
-        ? [...dynamic, ...dynamic, narratives.getNPCFromStatic()][Math.floor(Math.random() * (dynamic.length * 2 + 1))]
-        : narratives.getRandomNPC();
+        ? [...dynamic, ...dynamic, nar.getNPCFromStatic()][Math.floor(Math.random() * (dynamic.length * 2 + 1))]
+        : nar.getRandomNPC();
       await send(sock, jid,
         `🤖 *[PERSONAGEM NA CENA]*\n\n` +
         `👤 *Nome:* ${npc.name}\n🏷️ *Tipo:* ${npc.type}\n📝 *Descrição:* ${npc.desc}\n⚠️ *Motivação:* ${npc.motivation}` +
@@ -238,16 +267,16 @@ async function handleMessage(sock, msg) {
     if (body === '!encerrar') {
       if (replyIfNotGM(game, sock, msg, '!encerrar')) return;
       game.end();
-      await send(sock, jid, narratives.outro);
+      await send(sock, jid, nar.outro);
       return;
     }
 
-    if (body === '!ajuda') { await send(sock, jid, narratives.help); return; }
+    if (body === '!ajuda') { await send(sock, jid, nar.help); return; }
 
     if (body === '!cena') {
       if (replyIfNotGM(game, sock, msg, '!cena')) return;
       const lastTurnSummary = game.actionLog.filter(a => a.turn === game.turn).map(a => `${a.name}: ${a.action}`).join('; ');
-      const scene = await generateTurnNarrative(game.turn, lastTurnSummary);
+      const scene = await generateTurnNarrative(game.turn, lastTurnSummary, campaignPrompt);
       await send(sock, jid, `🌆 *[CENA ATUAL — TURNO ${game.turn}]*\n\n${scene}`);
       return;
     }

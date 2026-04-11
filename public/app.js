@@ -2,16 +2,19 @@
 const state = {
   token: localStorage.getItem('token'),
   theme: localStorage.getItem('theme') || 'light',
-  page: 'config',
-  convId: null,
-  cfg: null,
+  page: 'campaigns',       // campaigns | campaign-form | conversations | detail
+  campaigns: [],
+  activeCampaign: null,    // campanha selecionada no sidebar
+  editingCampaign: null,   // null = nova, object = editar
   convs: [],
+  convId: null,
   detail: null,
   saveMsg: null,
   saveMsgType: null,
   waStatus: null,
   waQr: null,
   _waPollTimer: null,
+  sidebarOpen: false,
 }
 
 // ── Theme ───────────────────────────────────────────────────────────────────
@@ -71,6 +74,7 @@ function stopWaPoll() {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function formatJid(jid) {
+  if (!jid) return '—'
   const num = jid.replace(/@.*$/, '').replace(/:.*$/, '')
   if (num.length >= 10) return '+' + num.replace(/(\d{2})(\d{2})(\d{5})(\d{4})/, '$1 ($2) $3-$4')
   return num
@@ -83,11 +87,22 @@ function formatTime(iso) {
   const d = new Date(iso.endsWith('Z') ? iso : iso + 'Z')
   return d.toLocaleTimeString('pt-BR', { hour:'2-digit', minute:'2-digit' })
 }
-function getInitial(jid) {
-  return jid.replace(/@.*$/, '').replace(/:.*$/, '').slice(-2, -1) || '?'
+function getInitial(str) {
+  return (str || '?').replace(/@.*$/, '').replace(/:.*$/, '').slice(-2, -1) || '?'
 }
 function esc(str) {
   return String(str ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+}
+function showAlert(type, msg, containerSel) {
+  state.saveMsg = msg; state.saveMsgType = type
+  const html = `<div class="alert alert-${type}">${esc(msg)}</div>`
+  const existing = document.querySelector('.alert')
+  if (existing) existing.outerHTML = html
+  else {
+    const anchor = document.querySelector(containerSel || '.page-header')
+    anchor?.insertAdjacentHTML('afterend', html)
+  }
+  setTimeout(() => { state.saveMsg = null; document.querySelector('.alert')?.remove() }, 3000)
 }
 
 // ── Render ───────────────────────────────────────────────────────────────────
@@ -174,10 +189,9 @@ function renderQrPage() {
 // ── Shell ────────────────────────────────────────────────────────────────────
 function renderShell() {
   const themeIcon = state.theme === 'dark' ? '☀️' : '🌙'
-  const configActive = state.page === 'config' ? 'active' : ''
-  const convActive = (state.page === 'conversations' || state.page === 'detail') ? 'active' : ''
   return `
   <header class="header">
+    <button class="btn-icon sidebar-toggle" id="sidebar-toggle-btn" title="Menu">☰</button>
     <div class="header-logo"><div class="header-logo-dot">🎲</div> RPG Bot Admin</div>
     <div class="header-actions">
       <button class="btn-icon" id="theme-btn" title="Alternar tema">${themeIcon}</button>
@@ -185,22 +199,65 @@ function renderShell() {
     </div>
   </header>
   <div class="layout">
-    <nav class="sidebar">
-      <button class="nav-item ${configActive}" data-page="config">⚙️ &nbsp;Configurações</button>
-      <button class="nav-item ${convActive}"   data-page="conversations">💬 &nbsp;Conversas</button>
+    <nav class="sidebar" id="sidebar">
+      ${renderSidebarContent()}
     </nav>
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
     <main class="content" id="page-content">
       <div class="loading"><div class="loading-spinner"></div></div>
     </main>
   </div>
   <nav class="bottom-nav">
-    <button class="bottom-nav-item ${configActive}" data-page="config">
-      <span class="nav-icon">⚙️</span><span class="nav-label">Config</span>
+    <button class="bottom-nav-item ${state.page === 'campaigns' || state.page === 'campaign-form' ? 'active' : ''}" data-page="campaigns">
+      <span class="nav-icon">🗡️</span><span class="nav-label">Campanhas</span>
     </button>
-    <button class="bottom-nav-item ${convActive}" data-page="conversations">
+    <button class="bottom-nav-item ${state.page === 'conversations' || state.page === 'detail' ? 'active' : ''}" data-page="conversations">
       <span class="nav-icon">💬</span><span class="nav-label">Conversas</span>
     </button>
+    <button class="bottom-nav-item ${state.page === 'config' ? 'active' : ''}" data-page="config">
+      <span class="nav-icon">⚙️</span><span class="nav-label">Config</span>
+    </button>
   </nav>`
+}
+
+function renderSidebarContent() {
+  const configActive = state.page === 'config' ? 'active' : ''
+  const isConvPage = state.page === 'conversations' || state.page === 'detail'
+
+  const campaignItems = state.campaigns.map(c => {
+    const isSelected = state.activeCampaign?.id === c.id
+    const convActive = isSelected && isConvPage ? 'active' : ''
+    const campActive = isSelected && !isConvPage ? 'active' : ''
+    return `
+    <div class="sidebar-campaign-group">
+      <button class="nav-item nav-campaign ${campActive}" data-campaign-id="${c.id}" data-page="campaigns">
+        <span class="nav-campaign-dot" style="background:${campaignColor(c.id)}"></span>
+        <span class="nav-campaign-name">${esc(c.name)}</span>
+        ${c.active ? '' : '<span class="badge-inactive">inativa</span>'}
+      </button>
+      ${isSelected ? `
+      <div class="nav-subitems">
+        <button class="nav-item nav-subitem" data-page="campaign-form" data-campaign-id="${c.id}">
+          ✏️ &nbsp;Configurações
+        </button>
+        <button class="nav-item nav-subitem ${convActive}" data-page="conversations" data-campaign-id="${c.id}">
+          💬 &nbsp;Conversas
+        </button>
+      </div>` : ''}
+    </div>`
+  }).join('')
+
+  return `
+    <div class="sidebar-section-label">Campanhas</div>
+    ${campaignItems}
+    <button class="nav-item nav-new-campaign" id="new-campaign-btn">＋ &nbsp;Nova campanha</button>
+    <div class="sidebar-divider"></div>
+    <button class="nav-item ${configActive}" data-page="config">⚙️ &nbsp;Configurações gerais</button>`
+}
+
+function campaignColor(id) {
+  const colors = ['#7c3aed','#0ea5e9','#10b981','#f59e0b','#ef4444','#ec4899','#8b5cf6','#06b6d4']
+  return colors[(id - 1) % colors.length]
 }
 
 function bindShell() {
@@ -209,16 +266,80 @@ function bindShell() {
     document.getElementById('theme-btn').textContent = state.theme === 'dark' ? '☀️' : '🌙'
   })
   document.getElementById('logout-btn').addEventListener('click', logout)
-  document.querySelectorAll('[data-page]').forEach(el => {
-    el.addEventListener('click', () => {
-      const page = el.getAttribute('data-page')
-      state.page = page; state.convId = null; state.detail = null
-      document.querySelectorAll('.nav-item, .bottom-nav-item').forEach(n => {
-        n.classList.toggle('active', n.getAttribute('data-page') === page || (page === 'detail' && n.getAttribute('data-page') === 'conversations'))
-      })
-      renderPage()
+
+  // Sidebar toggle (mobile)
+  const toggleBtn = document.getElementById('sidebar-toggle-btn')
+  const overlay = document.getElementById('sidebar-overlay')
+  const sidebar = document.getElementById('sidebar')
+  function openSidebar() { sidebar.classList.add('open'); overlay.classList.add('visible') }
+  function closeSidebar() { sidebar.classList.remove('open'); overlay.classList.remove('visible') }
+  toggleBtn.addEventListener('click', () => sidebar.classList.contains('open') ? closeSidebar() : openSidebar())
+  overlay.addEventListener('click', closeSidebar)
+
+  bindSidebarNav()
+  bindBottomNav()
+}
+
+function bindSidebarNav() {
+  // Clique em uma campanha: seleciona e vai para a lista de campanhas
+  document.querySelectorAll('.nav-campaign').forEach(el => {
+    el.addEventListener('click', async () => {
+      const id = parseInt(el.dataset.campaignId)
+      state.activeCampaign = state.campaigns.find(c => c.id === id) || null
+      state.page = 'campaigns'
+      state.convId = null; state.detail = null
+      refreshSidebar()
+      await renderPage()
     })
   })
+
+  // Subitens (config da campanha, conversas)
+  document.querySelectorAll('.nav-subitem').forEach(el => {
+    el.addEventListener('click', async () => {
+      const page = el.dataset.page
+      state.page = page
+      state.convId = null; state.detail = null
+      refreshSidebar()
+      await renderPage()
+    })
+  })
+
+  // Nova campanha
+  document.getElementById('new-campaign-btn')?.addEventListener('click', () => {
+    state.editingCampaign = null
+    state.page = 'campaign-form'
+    state.activeCampaign = null
+    refreshSidebar()
+    renderPage()
+  })
+
+  // Config geral
+  document.querySelector('.nav-item[data-page="config"]')?.addEventListener('click', () => {
+    state.page = 'config'
+    state.activeCampaign = null
+    refreshSidebar()
+    renderPage()
+  })
+}
+
+function bindBottomNav() {
+  document.querySelectorAll('.bottom-nav-item').forEach(el => {
+    el.addEventListener('click', async () => {
+      const page = el.dataset.page
+      state.page = page
+      state.convId = null; state.detail = null
+      document.querySelectorAll('.bottom-nav-item').forEach(n =>
+        n.classList.toggle('active', n.dataset.page === page || (page === 'detail' && n.dataset.page === 'conversations'))
+      )
+      await renderPage()
+    })
+  })
+}
+
+function refreshSidebar() {
+  const sidebar = document.getElementById('sidebar')
+  if (sidebar) sidebar.innerHTML = renderSidebarContent()
+  bindSidebarNav()
 }
 
 // ── Page Router ───────────────────────────────────────────────────────────────
@@ -227,45 +348,259 @@ async function renderPage() {
   if (!content) return
   content.innerHTML = '<div class="loading"><div class="loading-spinner"></div></div>'
   try {
-    if (state.page === 'config') {
-      state.cfg = await api('GET', '/config')
-      content.innerHTML = renderConfigPage(); bindConfig()
+    if (state.page === 'campaigns') {
+      if (state.activeCampaign) {
+        // Mostra detalhes/resumo da campanha selecionada
+        content.innerHTML = renderCampaignDetail(state.activeCampaign)
+        bindCampaignDetail()
+      } else {
+        content.innerHTML = renderCampaignsPage()
+        bindCampaignsPage()
+      }
+    } else if (state.page === 'campaign-form') {
+      state.editingCampaign = state.activeCampaign
+        ? await api('GET', `/campaigns/${state.activeCampaign.id}`)
+        : null
+      content.innerHTML = renderCampaignForm(state.editingCampaign)
+      bindCampaignForm()
     } else if (state.page === 'conversations') {
-      state.convs = await api('GET', '/conversations')
-      content.innerHTML = renderConversationsPage(); bindConversations()
+      const campId = state.activeCampaign?.id
+      state.convs = await api('GET', campId ? `/conversations?campaign_id=${campId}` : '/conversations')
+      content.innerHTML = renderConversationsPage()
+      bindConversations()
     } else if (state.page === 'detail' && state.convId) {
       state.detail = await api('GET', `/conversations/${state.convId}`)
-      content.innerHTML = renderDetailPage(); bindDetail()
+      content.innerHTML = renderDetailPage()
+      bindDetail()
+    } else if (state.page === 'config') {
+      const cfg = await api('GET', '/config')
+      content.innerHTML = renderConfigPage(cfg)
+      bindConfig(cfg)
     }
   } catch (e) {
     content.innerHTML = `<div class="alert alert-error">${esc(e.message)}</div>`
   }
 }
 
-// ── Config Page ───────────────────────────────────────────────────────────────
-function renderConfigPage() {
-  const { prompt, context_data, triggers } = state.cfg
+// ── Campaigns List Page ───────────────────────────────────────────────────────
+function renderCampaignsPage() {
+  if (state.campaigns.length === 0) {
+    return `
+    <div class="page-header"><h1>🗡️ Campanhas</h1></div>
+    <div class="empty">
+      <div class="empty-icon">🎲</div>
+      <p>Nenhuma campanha cadastrada ainda.</p>
+      <button class="btn btn-primary btn-sm" id="first-campaign-btn" style="width:auto;margin-top:.5rem">＋ Criar primeira campanha</button>
+    </div>`
+  }
+  const cards = state.campaigns.map(c => `
+    <button class="campaign-card" data-id="${c.id}">
+      <div class="campaign-card-dot" style="background:${campaignColor(c.id)}"></div>
+      <div class="campaign-card-info">
+        <div class="campaign-card-name">${esc(c.name)}</div>
+        <div class="campaign-card-theme">${esc(c.theme) || '<em style="opacity:.5">Sem tema</em>'}</div>
+        ${c.jid ? `<div class="campaign-card-jid">📱 ${esc(formatJid(c.jid))}</div>` : ''}
+      </div>
+      <span class="campaign-card-status ${c.active ? 'active' : 'inactive'}">${c.active ? 'Ativa' : 'Inativa'}</span>
+    </button>`).join('')
+
+  return `
+  <div class="page-header">
+    <h1>🗡️ Campanhas</h1>
+    <button class="btn btn-primary btn-sm" id="add-campaign-btn" style="width:auto">＋ Nova</button>
+  </div>
+  <div class="campaign-list">${cards}</div>`
+}
+
+function bindCampaignsPage() {
+  document.getElementById('add-campaign-btn')?.addEventListener('click', () => {
+    state.editingCampaign = null; state.activeCampaign = null; state.page = 'campaign-form'
+    refreshSidebar(); renderPage()
+  })
+  document.getElementById('first-campaign-btn')?.addEventListener('click', () => {
+    state.editingCampaign = null; state.activeCampaign = null; state.page = 'campaign-form'
+    refreshSidebar(); renderPage()
+  })
+  document.querySelectorAll('.campaign-card').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = parseInt(el.dataset.id)
+      state.activeCampaign = state.campaigns.find(c => c.id === id) || null
+      state.page = 'campaigns'
+      refreshSidebar(); renderPage()
+    })
+  })
+}
+
+// ── Campaign Detail (resumo após selecionar no sidebar) ───────────────────────
+function renderCampaignDetail(c) {
+  return `
+  <div class="page-header">
+    <div class="campaign-header-dot" style="background:${campaignColor(c.id)}"></div>
+    <h1>${esc(c.name)}</h1>
+    <button class="btn btn-ghost btn-sm" id="edit-campaign-btn" style="width:auto">✏️ Editar</button>
+  </div>
+  <div class="card">
+    <div class="card-title">📋 Informações</div>
+    ${c.theme ? `<p><strong>Tema:</strong> ${esc(c.theme)}</p>` : ''}
+    ${c.jid ? `<p style="margin-top:.5rem"><strong>Grupo WhatsApp:</strong> ${esc(formatJid(c.jid))}</p><p style="font-size:.8rem;color:var(--text-2)">${esc(c.jid)}</p>` : '<p style="color:var(--text-2);font-size:.875rem">Nenhum grupo WhatsApp vinculado.</p>'}
+    <p style="margin-top:.5rem"><strong>Status:</strong> <span class="campaign-card-status ${c.active ? 'active' : 'inactive'}">${c.active ? 'Ativa' : 'Inativa'}</span></p>
+  </div>
+  ${c.prompt ? `<div class="card"><div class="card-title">🎭 Prompt da IA</div><pre class="code-block">${esc(c.prompt)}</pre></div>` : ''}
+  ${c.context_data ? `<div class="card"><div class="card-title">🌆 Contexto</div><pre class="code-block">${esc(c.context_data)}</pre></div>` : ''}
+  <div style="display:flex;gap:.75rem;flex-wrap:wrap">
+    <button class="btn btn-ghost btn-sm" id="view-convs-btn" style="width:auto">💬 Ver conversas</button>
+    <button class="btn btn-danger btn-sm" id="delete-campaign-btn" style="width:auto">🗑️ Excluir campanha</button>
+  </div>`
+}
+
+function bindCampaignDetail() {
+  document.getElementById('edit-campaign-btn')?.addEventListener('click', () => {
+    state.page = 'campaign-form'; refreshSidebar(); renderPage()
+  })
+  document.getElementById('view-convs-btn')?.addEventListener('click', () => {
+    state.page = 'conversations'; refreshSidebar(); renderPage()
+  })
+  document.getElementById('delete-campaign-btn')?.addEventListener('click', async () => {
+    if (!confirm(`Excluir a campanha "${state.activeCampaign.name}"? Esta ação não pode ser desfeita.`)) return
+    try {
+      await api('DELETE', `/campaigns/${state.activeCampaign.id}`)
+      state.campaigns = state.campaigns.filter(c => c.id !== state.activeCampaign.id)
+      state.activeCampaign = null; state.page = 'campaigns'
+      refreshSidebar(); renderPage()
+    } catch (e) { showAlert('error', e.message) }
+  })
+}
+
+// ── Campaign Form ─────────────────────────────────────────────────────────────
+function renderCampaignForm(c) {
+  const isEdit = !!c
+  return `
+  <div class="page-header">
+    <button class="chat-back" id="back-btn">← Voltar</button>
+    <h1>${isEdit ? '✏️ Editar campanha' : '＋ Nova campanha'}</h1>
+  </div>
+  <div class="card">
+    <div class="card-title">📋 Identificação</div>
+    <div class="form-group">
+      <label for="camp-name">Nome da campanha *</label>
+      <input id="camp-name" type="text" placeholder="Ex: Armazém 9-Delta" value="${esc(c?.name ?? '')}">
+    </div>
+    <div class="form-group">
+      <label for="camp-theme">Tema / Gênero</label>
+      <input id="camp-theme" type="text" placeholder="Ex: Cyberpunk, Medieval, Lovecraftiano…" value="${esc(c?.theme ?? '')}">
+    </div>
+    <div class="form-group">
+      <label for="camp-jid">JID do grupo WhatsApp</label>
+      <input id="camp-jid" type="text" placeholder="120363000000000000@g.us" value="${esc(c?.jid ?? '')}">
+      <small>
+        ID interno do grupo — <strong>não é o nome do grupo</strong>.<br>
+        Digite <strong>!jid</strong> no grupo WhatsApp para obter o valor correto e cole aqui.<br>
+        Formato esperado: <code>120363XXXXXXXXXX@g.us</code>
+        ${c?.jid && !c.jid.includes('@') ? `<br><span style="color:var(--danger,#ef4444)">⚠️ O valor atual (<em>${esc(c.jid)}</em>) não parece um JID válido. Use !jid no grupo para corrigir.</span>` : ''}
+      </small>
+    </div>
+    <div class="form-group" style="flex-direction:row;align-items:center;gap:.75rem">
+      <input id="camp-active" type="checkbox" style="width:auto" ${c?.active !== 0 ? 'checked' : ''}>
+      <label for="camp-active" style="text-transform:none;letter-spacing:0;font-size:.9375rem">Campanha ativa</label>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">🎭 Prompt da IA</div>
+    <div class="form-group">
+      <textarea id="camp-prompt" rows="6" placeholder="Instrui o comportamento narrativo do Claude como Mestre do RPG…">${esc(c?.prompt ?? '')}</textarea>
+    </div>
+    <small>Deixe em branco para usar as configurações globais.</small>
+  </div>
+  <div class="card">
+    <div class="card-title">🌆 Contexto da campanha</div>
+    <div class="form-group">
+      <textarea id="camp-context" rows="8" placeholder="Descreva o cenário, facções, missão, NPCs importantes…">${esc(c?.context_data ?? '')}</textarea>
+    </div>
+  </div>
+  <div class="save-bar">
+    <button class="btn btn-ghost btn-sm" id="cancel-form-btn" style="width:auto">Cancelar</button>
+    <button class="btn btn-primary btn-sm" id="save-campaign-btn" style="width:auto">💾 ${isEdit ? 'Salvar alterações' : 'Criar campanha'}</button>
+  </div>`
+}
+
+function bindCampaignForm() {
+  const isEdit = !!state.editingCampaign
+  document.getElementById('back-btn')?.addEventListener('click', () => {
+    state.page = state.activeCampaign ? 'campaigns' : 'campaigns'
+    refreshSidebar(); renderPage()
+  })
+  document.getElementById('cancel-form-btn')?.addEventListener('click', () => {
+    state.page = 'campaigns'; refreshSidebar(); renderPage()
+  })
+  document.getElementById('save-campaign-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('save-campaign-btn')
+    const payload = {
+      name: document.getElementById('camp-name').value.trim(),
+      theme: document.getElementById('camp-theme').value.trim(),
+      jid: document.getElementById('camp-jid').value.trim() || null,
+      prompt: document.getElementById('camp-prompt').value,
+      context_data: document.getElementById('camp-context').value,
+      active: document.getElementById('camp-active').checked ? 1 : 0,
+    }
+    if (!payload.name) { showAlert('error', 'Nome da campanha é obrigatório'); return }
+    btn.disabled = true; btn.textContent = 'Salvando…'
+    try {
+      let saved
+      if (isEdit) {
+        saved = await api('PUT', `/campaigns/${state.editingCampaign.id}`, payload)
+        state.campaigns = state.campaigns.map(c => c.id === saved.id ? saved : c)
+        state.activeCampaign = saved
+      } else {
+        saved = await api('POST', '/campaigns', payload)
+        state.campaigns.unshift(saved)
+        state.activeCampaign = saved
+      }
+      state.page = 'campaigns'
+      refreshSidebar(); renderPage()
+    } catch (e) {
+      showAlert('error', e.message)
+      btn.disabled = false; btn.textContent = isEdit ? '💾 Salvar alterações' : '💾 Criar campanha'
+    }
+  })
+}
+
+// ── Config Page (global) ──────────────────────────────────────────────────────
+function renderConfigPage(cfg) {
+  const { prompt, context_data, jid, active, triggers } = cfg
   const tags = triggers.map(t => `
     <button class="tag" data-id="${t.id}" title="Clique para remover">
       ${esc(t.keyword)} <span class="tag-remove">✕</span>
     </button>`).join('')
-  const saveAlert = state.saveMsg ? `<div class="alert alert-${state.saveMsgType}">${esc(state.saveMsg)}</div>` : ''
   return `
-  <div class="page-header"><h1>⚙️ Configurações</h1></div>
-  ${saveAlert}
+  <div class="page-header"><h1>⚙️ Configurações globais</h1></div>
   <div class="card">
-    <div class="card-title">🎭 Prompt do Mestre (IA)</div>
+    <div class="card-title">📋 Identificação</div>
+    <div class="form-group">
+      <label for="cfg-jid">JID do grupo WhatsApp</label>
+      <input id="cfg-jid" type="text" placeholder="120363000000000000@g.us" value="${esc(jid ?? '')}">
+      <small>ID interno do grupo padrão (Cyberpunk). Use <strong>!jid</strong> no grupo para obter o valor correto.</small>
+    </div>
+    <div class="form-group" style="flex-direction:row;align-items:center;gap:.75rem">
+      <input id="cfg-active" type="checkbox" style="width:auto" ${active !== 0 ? 'checked' : ''}>
+      <label for="cfg-active" style="text-transform:none;letter-spacing:0;font-size:.9375rem">Configuração ativa</label>
+    </div>
+    ${jid ? `<p style="margin-top:.25rem;font-size:.8rem;color:var(--text-2)">
+      <strong>Grupo vinculado:</strong> ${esc(formatJid(jid))}
+      &nbsp;<span class="campaign-card-status ${active !== 0 ? 'active' : 'inactive'}">${active !== 0 ? 'Ativa' : 'Inativa'}</span>
+    </p>` : ''}
+  </div>
+  <div class="card">
+    <div class="card-title">🎭 Prompt padrão do Mestre (IA)</div>
     <div class="form-group">
       <textarea id="cfg-prompt" rows="6">${esc(prompt)}</textarea>
     </div>
-    <small>Instrui o comportamento narrativo do Claude como Mestre do RPG.</small>
+    <small>Usado quando a campanha não tem prompt próprio.</small>
   </div>
   <div class="card">
-    <div class="card-title">🌆 Contexto da Campanha</div>
+    <div class="card-title">🌆 Contexto padrão</div>
     <div class="form-group">
       <textarea id="cfg-context" rows="8">${esc(context_data)}</textarea>
     </div>
-    <small>Informações da campanha injetadas no contexto de cada narração.</small>
   </div>
   <div class="card">
     <div class="card-title">🏷️ Palavras-gatilho</div>
@@ -283,15 +618,14 @@ function renderConfigPage() {
   </div>`
 }
 
-function bindConfig() {
+function bindConfig(_cfg) {
   document.getElementById('tags-container').addEventListener('click', async e => {
     const tag = e.target.closest('.tag')
     if (!tag) return
     try {
       await api('DELETE', `/config/triggers/${tag.dataset.id}`)
       tag.remove()
-      state.cfg.triggers = state.cfg.triggers.filter(t => String(t.id) !== tag.dataset.id)
-    } catch (err) { showSaveMsg('error', err.message) }
+    } catch (err) { showAlert('error', err.message) }
   })
 
   async function addTrigger() {
@@ -301,13 +635,12 @@ function bindConfig() {
     try {
       const created = await api('POST', '/config/triggers', { keyword })
       if (!created) return
-      state.cfg.triggers.push(created)
-      const btn = document.createElement('button')
-      btn.className = 'tag'; btn.dataset.id = created.id; btn.title = 'Clique para remover'
-      btn.innerHTML = `${esc(created.keyword)} <span class="tag-remove">✕</span>`
-      document.getElementById('tags-container').appendChild(btn)
+      const btn2 = document.createElement('button')
+      btn2.className = 'tag'; btn2.dataset.id = created.id; btn2.title = 'Clique para remover'
+      btn2.innerHTML = `${esc(created.keyword)} <span class="tag-remove">✕</span>`
+      document.getElementById('tags-container').appendChild(btn2)
       input.value = ''
-    } catch (err) { showSaveMsg('error', err.message) }
+    } catch (err) { showAlert('error', err.message) }
   }
 
   document.getElementById('add-trigger-btn').addEventListener('click', addTrigger)
@@ -320,24 +653,18 @@ function bindConfig() {
       await api('PUT', '/config', {
         prompt: document.getElementById('cfg-prompt').value,
         context_data: document.getElementById('cfg-context').value,
+        jid: document.getElementById('cfg-jid').value.trim() || null,
+        active: document.getElementById('cfg-active').checked ? 1 : 0,
       })
-      showSaveMsg('success', 'Configurações salvas com sucesso!')
-    } catch (err) { showSaveMsg('error', err.message) }
+      showAlert('success', 'Configurações salvas com sucesso!')
+    } catch (err) { showAlert('error', err.message) }
     finally { btn.disabled = false; btn.innerHTML = '💾 Salvar configurações' }
   })
 }
 
-function showSaveMsg(type, msg) {
-  state.saveMsg = msg; state.saveMsgType = type
-  const alertHtml = `<div class="alert alert-${type}">${esc(msg)}</div>`
-  const existing = document.querySelector('.alert')
-  if (existing) existing.outerHTML = alertHtml
-  else document.querySelector('.page-header').insertAdjacentHTML('afterend', alertHtml)
-  setTimeout(() => { state.saveMsg = null; document.querySelector('.alert')?.remove() }, 3000)
-}
-
 // ── Conversations ─────────────────────────────────────────────────────────────
 function renderConversationsPage() {
+  const title = state.activeCampaign ? `💬 Conversas — ${esc(state.activeCampaign.name)}` : '💬 Todas as conversas'
   const items = state.convs.map(c => {
     const num = formatJid(c.jid)
     const preview = c.last_message ? esc(c.last_message.slice(0, 60)) + (c.last_message.length > 60 ? '…' : '') : '<em>Sem mensagens</em>'
@@ -356,7 +683,7 @@ function renderConversationsPage() {
   }).join('')
   return `
   <div class="page-header">
-    <h1>💬 Conversas</h1>
+    <h1>${title}</h1>
     <button class="btn btn-ghost btn-sm" id="refresh-btn">↺ Atualizar</button>
   </div>
   ${state.convs.length === 0
@@ -366,7 +693,7 @@ function renderConversationsPage() {
 }
 
 function bindConversations() {
-  document.getElementById('refresh-btn')?.addEventListener('click', () => { state.page = 'conversations'; renderPage() })
+  document.getElementById('refresh-btn')?.addEventListener('click', () => renderPage())
   document.querySelectorAll('.conv-item').forEach(el => {
     el.addEventListener('click', () => { state.convId = el.dataset.id; state.page = 'detail'; renderPage() })
   })
@@ -404,5 +731,15 @@ function bindDetail() {
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
-render()
+async function init() {
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
+  if (state.token) {
+    await checkWaStatus()
+    if (state.waStatus === 'connected') {
+      state.campaigns = await api('GET', '/campaigns') || []
+    }
+  }
+  render()
+}
+
+init()

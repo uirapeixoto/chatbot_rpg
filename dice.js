@@ -71,16 +71,16 @@ function getDCForAction(action) {
   const lower = action.toLowerCase();
 
   // Ações de combate direto
-  if (/atirar|disparar|atacar|golpear|cortar|esfaquear/.test(lower)) return 13;
+  if (/atirar|disparar|atacar|golpear|cortar|esfaquear|espada|flecha|arco|ferir|lutar/.test(lower)) return 13;
 
   // Ações furtivas
-  if (/esconder|infiltrar|furtivo|silencioso|ocultar/.test(lower)) return 14;
+  if (/esconder|infiltrar|furtivo|silencioso|ocultar|esgueirar/.test(lower)) return 14;
 
-  // Hacking e tecnologia
-  if (/hackear|invadir|sistema|terminal|dados|encrypt/.test(lower)) return 15;
+  // Hacking, tecnologia e magia arcana
+  if (/hackear|invadir|sistema|terminal|dados|encrypt|magia|encantamento|runa|feitiço|arcano|canalizar/.test(lower)) return 15;
 
   // Percepção e observação
-  if (/observar|perceber|notar|ouvir|detectar|procurar/.test(lower)) return 11;
+  if (/observar|perceber|notar|ouvir|escutar|detectar|procurar/.test(lower)) return 11;
 
   // Ações sociais
   if (/convencer|negociar|blefar|enganar|persuadir/.test(lower)) return 12;
@@ -89,7 +89,7 @@ function getDCForAction(action) {
   if (/correr|pular|escalar|fugir|empurrar/.test(lower)) return 12;
 
   // Medicina / primeiros socorros
-  if (/curar|tratar|estabilizar|medikit/.test(lower)) return 14;
+  if (/curar|tratar|estabilizar|medikit|ervas|bandagem/.test(lower)) return 14;
 
   // Padrão
   return 12;

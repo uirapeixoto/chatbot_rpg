@@ -3,17 +3,40 @@ const { db } = require('../../db/database');
 
 const router = Router();
 
-router.get('/', (req, res) => {
-  const cfg = db.prepare('SELECT prompt, context_data FROM config WHERE id = 1').get();
-  const triggers = db.prepare('SELECT id, keyword FROM triggers ORDER BY keyword COLLATE NOCASE').all();
-  res.json({ ...cfg, triggers });
+// ── Campaigns ────────────────────────────────────────────────────────────────
+router.get('/campaigns', (req, res) => {
+  res.json(db.prepare('SELECT * FROM campaigns ORDER BY id').all());
 });
 
-router.put('/', (req, res) => {
-  const { prompt, context_data } = req.body ?? {};
-  db.prepare(`UPDATE config SET prompt = ?, context_data = ?, updated_at = datetime('now') WHERE id = 1`)
-    .run(prompt ?? '', context_data ?? '');
+router.post('/campaigns', (req, res) => {
+  const { name, jid, theme, prompt, context_data } = req.body ?? {};
+  if (!name) return res.status(400).json({ error: 'Nome obrigatório' });
+  try {
+    const result = db.prepare(
+      'INSERT INTO campaigns (name, jid, theme, prompt, context_data) VALUES (?, ?, ?, ?, ?)'
+    ).run(name, jid?.trim() || null, theme ?? '', prompt ?? '', context_data ?? '');
+    res.status(201).json({ id: result.lastInsertRowid });
+  } catch {
+    res.status(409).json({ error: 'JID já vinculado a outra campanha' });
+  }
+});
+
+router.put('/campaigns/:id', (req, res) => {
+  const { name, jid, theme, prompt, context_data, active } = req.body ?? {};
+  db.prepare(
+    'UPDATE campaigns SET name=?, jid=?, theme=?, prompt=?, context_data=?, active=? WHERE id=?'
+  ).run(name ?? '', jid?.trim() || null, theme ?? '', prompt ?? '', context_data ?? '', active ?? 1, req.params.id);
   res.json({ ok: true });
+});
+
+router.delete('/campaigns/:id', (req, res) => {
+  db.prepare('DELETE FROM campaigns WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// ── Triggers ─────────────────────────────────────────────────────────────────
+router.get('/', (req, res) => {
+  res.json({ triggers: db.prepare('SELECT id, keyword FROM triggers ORDER BY keyword COLLATE NOCASE').all() });
 });
 
 router.post('/triggers', (req, res) => {

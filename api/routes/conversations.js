@@ -4,15 +4,18 @@ const { db } = require('../../db/database');
 const router = Router();
 
 router.get('/', (req, res) => {
+  const { campaign_id } = req.query;
+  const where = campaign_id ? 'WHERE c.campaign_id = ?' : '';
   const rows = db.prepare(`
     SELECT
-      c.id, c.jid, c.started_at, c.last_message_at,
+      c.id, c.jid, c.campaign_id, c.started_at, c.last_message_at,
       (SELECT content FROM messages WHERE conversation_id = c.id ORDER BY id DESC LIMIT 1) AS last_message,
       (SELECT COUNT(*) FROM messages WHERE conversation_id = c.id) AS message_count
     FROM conversations c
+    ${where}
     ORDER BY c.last_message_at DESC
     LIMIT 200
-  `).all();
+  `).all(...(campaign_id ? [campaign_id] : []));
   res.json(rows);
 });
 

@@ -15,11 +15,15 @@ db.exec(`
     password_hash TEXT NOT NULL
   );
 
-  CREATE TABLE IF NOT EXISTS config (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
+  CREATE TABLE IF NOT EXISTS campaigns (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    jid TEXT UNIQUE,
+    theme TEXT NOT NULL DEFAULT '',
     prompt TEXT NOT NULL DEFAULT '',
     context_data TEXT NOT NULL DEFAULT '',
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS triggers (
@@ -30,6 +34,7 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     jid TEXT NOT NULL,
+    campaign_id INTEGER REFERENCES campaigns(id),
     started_at TEXT NOT NULL DEFAULT (datetime('now')),
     last_message_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
@@ -44,12 +49,31 @@ db.exec(`
   );
 `);
 
-const configExists = db.prepare('SELECT id FROM config WHERE id = 1').get();
+// Migrações (colunas adicionadas em versões posteriores)
+try { db.exec('ALTER TABLE conversations ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id)'); } catch (_) {}
+
+const configExists = db.prepare("SELECT id FROM campaigns WHERE name = 'CampanhaCyberpunk'").get();
 if (!configExists) {
-  db.prepare('INSERT INTO config (id, prompt, context_data) VALUES (1, ?, ?)').run(
-    `Você é o Mestre de um RPG de mesa no estilo Cyberpunk, ambientado em Neon City no ano 2087. Narre os resultados das ações dos jogadores de forma imersiva e cinematográfica. Use tom noir/cyberpunk: sombrio, tenso, com detalhes sensoriais de neon, chuva ácida e metal.`,
-    `Campanha: Infiltração no Armazém 9-Delta\nMegacorporação OmniTech domina Neon City.\nFixer: Zara "Espinho" Vasquez\nObjetivo: recuperar chip de dados comprometedores do CEO da OmniTech.\nPagamento: 80.000 créditos digitais.`
-  );
+  db.prepare(`INSERT INTO campaigns (name, jid, theme, prompt, context_data, active) VALUES (?, ?, ?, ?, ?, 1)`)
+    .run(
+      'CampanhaCyberpunk',
+      null,
+      'Cyberpunk / Neon City 2087',
+      `Você é o Mestre de um RPG de mesa no estilo Cyberpunk, ambientado em Neon City no ano 2087. Narre os resultados das ações dos jogadores de forma imersiva e cinematográfica. Use tom noir/cyberpunk: sombrio, tenso, com detalhes sensoriais de neon, chuva ácida e metal. Respostas curtas e impactantes (2-4 linhas). Nunca mate um jogador permanentemente. Responda APENAS com a narração.`,
+      `Campanha: Infiltração no Armazém 9-Delta\nMegacorporação OmniTech domina Neon City.\nFixer: Zara "Espinho" Vasquez\nObjetivo: recuperar chip de dados comprometedores do CEO da OmniTech.\nPagamento: 80.000 créditos digitais.`
+    );
+}
+
+const medievalExists = db.prepare("SELECT id FROM campaigns WHERE name = 'CampanhaMedieval'").get();
+if (!medievalExists) {
+  db.prepare(`INSERT INTO campaigns (name, jid, theme, prompt, context_data, active) VALUES (?, ?, ?, ?, ?, 1)`)
+    .run(
+      'CampanhaMedieval',
+      null,
+      'Medieval / J.R.R. Tolkien',
+      `Você é o Mestre de um RPG de mesa no estilo épico medieval tolkieniano, ambientado em Eriador na Terceira Era. Narre os resultados das ações dos jogadores de forma imersiva e épica. Use tom tolkieniano: grandioso, poético, com detalhes sensoriais de pedra ancestral, luz de tocha e o peso do destino. Descreva heróis comuns diante de forças maiores que si mesmos.`,
+      `Campanha: O Fragmento de Anar\nMago Errante: Mirathas o Cinzento\nObjetivo: recuperar o Fragmento de Anar, gema de luz ancestral, das Ruínas de Khazad-Tor antes que os servos das trevas a tomem.\nRecompensa: gratidão dos Povos Livres e um artefato de proteção.\nAmeaça: Korthul o Cavaleiro Pálido lidera os servos do Senhor das Sombras.\nAté 4 jogadores, sessão curta de 4 turnos.`
+    );
 }
 
 const triggersCount = db.prepare('SELECT COUNT(*) as n FROM triggers').get();

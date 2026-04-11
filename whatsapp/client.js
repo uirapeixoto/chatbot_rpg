@@ -4,6 +4,16 @@ const { useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = r
 const qrcode = require('qrcode-terminal');
 const { waState } = require('./state');
 
+// Logger silencioso: suprime erros não-fatais de init (fetchProps 400, bad-request)
+const SILENT_MSGS = ["unexpected error in 'init queries'", "unexpected error in 'presence update requests'"];
+const baileysLogger = {
+  level: 'silent',
+  trace: () => {}, debug: () => {}, info: () => {},
+  warn: (obj, msg) => { if (msg && !SILENT_MSGS.includes(msg)) console.warn('[WA]', msg); },
+  error: (obj, msg) => { if (msg && !SILENT_MSGS.includes(msg)) console.error('[WA]', msg); },
+  child: () => baileysLogger,
+};
+
 let reconnectDelay = 3000;
 let _sock = null;
 
@@ -13,7 +23,7 @@ async function startWhatsApp(onMessage) {
 
   console.log(`[WhatsApp] Usando versão WA: ${version.join('.')}`);
 
-  const sock = makeWASocket({ auth: state, version, printQRInTerminal: false });
+  const sock = makeWASocket({ auth: state, version, printQRInTerminal: false, logger: baileysLogger });
   _sock = sock;
 
   sock.ev.on('creds.update', saveCreds);

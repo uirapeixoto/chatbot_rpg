@@ -7,6 +7,7 @@ const { authMiddleware } = require('./middleware/auth');
 const authRoutes = require('./routes/auth');
 const configRoutes = require('./routes/config');
 const conversationsRoutes = require('./routes/conversations');
+const campaignsRoutes = require('./routes/campaigns');
 const whatsappRoutes = require('./routes/whatsapp');
 
 const PORT = parseInt(process.env.PORT || '3009', 10);
@@ -32,9 +33,10 @@ async function startServer() {
   app.use('/api/auth', authRoutes);
   app.use('/api/whatsapp', authMiddleware, whatsappRoutes);
   app.use('/api/config', authMiddleware, configRoutes);
+  app.use('/api/campaigns', authMiddleware, campaignsRoutes);
   app.use('/api/conversations', authMiddleware, conversationsRoutes);
 
-  app.get('/{*path}', (req, res) => {
+  app.get('/{*path}', (_req, res) => {
     res.sendFile(path.join(__dirname, '../public/index.html'));
   });
 

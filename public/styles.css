@@ -19,6 +19,7 @@
   --header:      #7c3aed;
   --header-text: #ffffff;
   --nav:         #ffffff;
+  --sidebar-w:   260px;
 }
 
 [data-theme="dark"] {
@@ -111,6 +112,8 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.5; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-dark); }
 .btn-ghost { background: transparent; color: var(--text-2); border: 1.5px solid var(--border); }
 .btn-ghost:hover:not(:disabled) { background: var(--surface-2); }
+.btn-danger { background: transparent; color: var(--danger); border: 1.5px solid var(--danger); }
+.btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--danger) 10%, transparent); }
 .btn-icon {
   background: transparent; border: none; cursor: pointer;
   padding: .5rem; border-radius: 50%; font-size: 1.25rem;
@@ -136,7 +139,7 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.5; }
   background: var(--header); color: var(--header-text);
   height: 56px; display: flex; align-items: center;
   padding: 0 1rem; gap: .5rem;
-  position: sticky; top: 0; z-index: 100; box-shadow: var(--shadow);
+  position: sticky; top: 0; z-index: 200; box-shadow: var(--shadow);
 }
 .header-logo { display: flex; align-items: center; gap: .5rem; font-weight: 700; font-size: 1.05rem; flex: 1; }
 .header-logo-dot {
@@ -144,27 +147,61 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.5; }
   border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 1rem;
 }
 .header-actions { display: flex; align-items: center; gap: .25rem; }
+.sidebar-toggle { display: flex; }
+@media (min-width: 768px) { .sidebar-toggle { display: none; } }
 
 /* ── Layout ──────────────────────────────────────────────────── */
-.layout { flex: 1; display: flex; min-height: 0; padding-bottom: 64px; }
+.layout { flex: 1; display: flex; min-height: 0; padding-bottom: 64px; position: relative; }
 @media (min-width: 768px) { .layout { padding-bottom: 0; } }
 
 /* ── Sidebar ─────────────────────────────────────────────────── */
 .sidebar {
-  display: none; width: 220px; flex-shrink: 0;
+  width: var(--sidebar-w); flex-shrink: 0;
   background: var(--nav); border-right: 1px solid var(--border);
-  padding: 1rem .5rem; flex-direction: column; gap: .25rem;
+  padding: 1rem .5rem; display: flex; flex-direction: column; gap: .125rem;
+  overflow-y: auto;
+  /* Mobile: off-canvas */
+  position: fixed; top: 56px; left: 0; bottom: 64px; z-index: 150;
+  transform: translateX(-100%); transition: transform .25s ease;
 }
-@media (min-width: 768px) { .sidebar { display: flex; } }
+.sidebar.open { transform: translateX(0); }
+.sidebar-overlay {
+  display: none; position: fixed; inset: 0; z-index: 140;
+  background: rgba(0,0,0,.4); backdrop-filter: blur(2px);
+}
+.sidebar-overlay.visible { display: block; }
+@media (min-width: 768px) {
+  .sidebar { position: static; transform: none; bottom: auto; }
+  .sidebar-overlay { display: none !important; }
+}
+
+/* ── Sidebar nav items ───────────────────────────────────────── */
+.sidebar-section-label {
+  font-size: .7rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .08em; color: var(--text-2); padding: .5rem 1rem .25rem;
+}
+.sidebar-divider { height: 1px; background: var(--border); margin: .5rem .5rem; }
 .nav-item {
-  display: flex; align-items: center; gap: .75rem;
-  padding: .75rem 1rem; border-radius: var(--radius-sm);
+  display: flex; align-items: center; gap: .5rem;
+  padding: .6rem .875rem; border-radius: var(--radius-sm);
   background: transparent; border: none; color: var(--text-2);
-  font-size: .9375rem; cursor: pointer; text-align: left; width: 100%;
+  font-size: .9rem; cursor: pointer; text-align: left; width: 100%;
   transition: background .15s, color .15s;
 }
 .nav-item:hover { background: var(--surface-2); color: var(--text); }
 .nav-item.active { background: var(--accent-pale); color: var(--accent); font-weight: 600; }
+.nav-campaign { gap: .625rem; }
+.nav-campaign-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.nav-campaign-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nav-new-campaign { color: var(--accent); font-weight: 600; }
+.nav-new-campaign:hover { background: var(--accent-pale); }
+.nav-subitems { padding-left: 1.25rem; display: flex; flex-direction: column; gap: .125rem; }
+.nav-subitem { font-size: .85rem; padding: .45rem .875rem; }
+.badge-inactive {
+  font-size: .65rem; font-weight: 600; padding: .1rem .4rem;
+  border-radius: 999px; background: var(--border); color: var(--text-2);
+  text-transform: uppercase; letter-spacing: .04em;
+}
 
 /* ── Bottom Nav ──────────────────────────────────────────────── */
 .bottom-nav {
@@ -187,7 +224,7 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.5; }
 @media (min-width: 768px) { .content { padding: 2rem 1.5rem; } }
 
 /* ── Page Header ─────────────────────────────────────────────── */
-.page-header { display: flex; align-items: center; gap: .75rem; margin-bottom: 1.5rem; }
+.page-header { display: flex; align-items: center; gap: .75rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
 .page-header h1 { flex: 1; }
 
 /* ── Cards ───────────────────────────────────────────────────── */
@@ -199,6 +236,41 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.5; }
   font-size: .875rem; font-weight: 600; color: var(--text-2);
   text-transform: uppercase; letter-spacing: .05em;
   margin-bottom: 1rem; display: flex; align-items: center; gap: .5rem;
+}
+
+/* ── Campaign Cards ──────────────────────────────────────────── */
+.campaign-list { display: flex; flex-direction: column; gap: .75rem; }
+.campaign-card {
+  display: flex; align-items: center; gap: 1rem;
+  background: var(--surface); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: 1rem 1.25rem;
+  border: none; cursor: pointer; text-align: left; width: 100%;
+  font-family: inherit; color: var(--text);
+  transition: box-shadow .15s, transform .1s;
+}
+.campaign-card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.campaign-card-dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+.campaign-card-info { flex: 1; min-width: 0; }
+.campaign-card-name { font-weight: 700; font-size: 1rem; }
+.campaign-card-theme { font-size: .8125rem; color: var(--text-2); margin-top: .15rem; }
+.campaign-card-jid { font-size: .75rem; color: var(--text-2); margin-top: .1rem; font-family: monospace; }
+.campaign-card-status {
+  font-size: .75rem; font-weight: 600; padding: .25rem .625rem;
+  border-radius: 999px; flex-shrink: 0;
+}
+.campaign-card-status.active { background: #d1fae5; color: #065f46; }
+.campaign-card-status.inactive { background: var(--border); color: var(--text-2); }
+[data-theme="dark"] .campaign-card-status.active { background: #064e3b; color: #6ee7b7; }
+
+.campaign-header-dot { width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; }
+
+/* ── Code block ──────────────────────────────────────────────── */
+.code-block {
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: .875rem 1rem;
+  font-size: .8125rem; font-family: 'SF Mono', 'Fira Code', monospace;
+  white-space: pre-wrap; word-break: break-word; color: var(--text-2);
+  line-height: 1.6;
 }
 
 /* ── Tags ────────────────────────────────────────────────────── */
@@ -222,11 +294,11 @@ textarea { resize: vertical; min-height: 120px; line-height: 1.5; }
   padding: .875rem 1rem; background: var(--surface);
   border-bottom: 1px solid var(--border); cursor: pointer;
   transition: background .15s; text-align: left; width: 100%;
-  border: none; font-family: inherit; color: var(--text);
+  border-left: none; border-right: none; font-family: inherit; color: var(--text);
 }
-.conv-item:first-child { border-radius: var(--radius) var(--radius) 0 0; }
+.conv-item:first-child { border-radius: var(--radius) var(--radius) 0 0; border-top: none; }
 .conv-item:last-child  { border-radius: 0 0 var(--radius) var(--radius); border-bottom: none; }
-.conv-item:only-child  { border-radius: var(--radius); }
+.conv-item:only-child  { border-radius: var(--radius); border: none; }
 .conv-item:hover { background: var(--surface-2); }
 .conv-avatar {
   width: 44px; height: 44px; flex-shrink: 0;
