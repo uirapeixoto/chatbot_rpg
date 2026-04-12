@@ -75,7 +75,7 @@ async function generateCampaignIntro(campaignName, systemPrompt) {
   }
 }
 
-turn, lastTurnSummary = '', systemPrompt = null) {
+async function generateTurnNarrative(turn, lastTurnSummary = '', systemPrompt = null) {
   const context = lastTurnSummary
     ? `Resumo do turno anterior: ${lastTurnSummary}`
     : 'É o início da missão.';
