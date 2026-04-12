@@ -373,9 +373,9 @@ async function renderPage() {
       content.innerHTML = renderDetailPage()
       bindDetail()
     } else if (state.page === 'config') {
-      const cfg = await api('GET', '/config')
-      content.innerHTML = renderConfigPage(cfg)
-      bindConfig(cfg)
+      const [cfg, cmds] = await Promise.all([api('GET', '/config'), api('GET', '/config/commands')])
+      content.innerHTML = renderConfigPage(cfg, cmds)
+      bindConfig(cfg, cmds)
     }
   } catch (e) {
     content.innerHTML = `<div class="alert alert-error">${esc(e.message)}</div>`
@@ -565,12 +565,22 @@ function bindCampaignForm() {
 }
 
 // ── Config Page (global) ──────────────────────────────────────────────────────
-function renderConfigPage(cfg) {
+function renderConfigPage(cfg, cmds = []) {
   const { prompt, context_data, jid, active, triggers } = cfg
   const tags = triggers.map(t => `
     <button class="tag" data-id="${t.id}" title="Clique para remover">
       ${esc(t.keyword)} <span class="tag-remove">✕</span>
     </button>`).join('')
+
+  const cmdRows = cmds.map(c => `
+    <tr>
+      <td><code>${esc(c.keyword)}</code></td>
+      <td>${esc(c.description)}</td>
+      <td style="text-align:right">
+        <button class="btn btn-ghost btn-sm cmd-delete" data-id="${c.id}">🗑️</button>
+      </td>
+    </tr>`).join('')
+
   return `
   <div class="page-header"><h1>⚙️ Configurações globais</h1></div>
   <div class="card">
@@ -615,10 +625,30 @@ function renderConfigPage(cfg) {
   </div>
   <div class="save-bar">
     <button class="btn btn-primary btn-sm" id="save-btn" style="width:auto">💾 Salvar configurações</button>
+  </div>
+
+  <div class="card" style="margin-top:1rem">
+    <div class="card-title">⚡ Comandos customizados</div>
+    <p style="font-size:.875rem;color:var(--text-2);margin-bottom:.875rem">
+      Crie comandos personalizados com IA. Use <code>{{text}}</code> no prompt para inserir o texto digitado após o comando.
+    </p>
+    <table style="width:100%;border-collapse:collapse;font-size:.875rem">
+      <thead><tr style="color:var(--text-2)"><th style="text-align:left;padding:.4rem 0">Comando</th><th style="text-align:left">Descrição</th><th></th></tr></thead>
+      <tbody id="cmd-table">${cmdRows}</tbody>
+    </table>
+    <details style="margin-top:1rem">
+      <summary style="cursor:pointer;font-size:.875rem;color:var(--accent)">+ Novo comando</summary>
+      <div style="margin-top:.75rem;display:flex;flex-direction:column;gap:.5rem">
+        <input id="new-cmd-keyword" type="text" placeholder="!translateenpt">
+        <input id="new-cmd-desc" type="text" placeholder="Descrição (ex: Traduz inglês → português)">
+        <textarea id="new-cmd-prompt" rows="3" placeholder="Prompt da IA. Use {{text}} para o conteúdo digitado pelo usuário."></textarea>
+        <button class="btn btn-ghost btn-sm" id="add-cmd-btn">+ Criar comando</button>
+      </div>
+    </details>
   </div>`
 }
 
-function bindConfig(_cfg) {
+function bindConfig(_cfg, _cmds) {
   document.getElementById('tags-container').addEventListener('click', async e => {
     const tag = e.target.closest('.tag')
     if (!tag) return
@@ -659,6 +689,34 @@ function bindConfig(_cfg) {
       showAlert('success', 'Configurações salvas com sucesso!')
     } catch (err) { showAlert('error', err.message) }
     finally { btn.disabled = false; btn.innerHTML = '💾 Salvar configurações' }
+  })
+
+  // Custom commands
+  document.getElementById('cmd-table')?.addEventListener('click', async e => {
+    const btn = e.target.closest('.cmd-delete')
+    if (!btn) return
+    try {
+      await api('DELETE', `/config/commands/${btn.dataset.id}`)
+      btn.closest('tr').remove()
+    } catch (err) { showAlert('error', err.message) }
+  })
+
+  document.getElementById('add-cmd-btn')?.addEventListener('click', async () => {
+    const keyword = document.getElementById('new-cmd-keyword').value.trim().toLowerCase()
+    const description = document.getElementById('new-cmd-desc').value.trim()
+    const action_prompt = document.getElementById('new-cmd-prompt').value.trim()
+    if (!keyword || !action_prompt) { showAlert('error', 'Keyword e prompt são obrigatórios'); return }
+    try {
+      const created = await api('POST', '/config/commands', { keyword, description, action_prompt })
+      if (!created) return
+      const tr = document.createElement('tr')
+      tr.innerHTML = `<td><code>${esc(created.keyword)}</code></td><td>${esc(description)}</td><td style="text-align:right"><button class="btn btn-ghost btn-sm cmd-delete" data-id="${created.id}">🗑️</button></td>`
+      document.getElementById('cmd-table').appendChild(tr)
+      document.getElementById('new-cmd-keyword').value = ''
+      document.getElementById('new-cmd-desc').value = ''
+      document.getElementById('new-cmd-prompt').value = ''
+      showAlert('success', `Comando ${keyword} criado!`)
+    } catch (err) { showAlert('error', err.message) }
   })
 }
 

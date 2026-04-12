@@ -107,4 +107,13 @@ function _fallbackNarrative(roll, dc) {
   return 'A ação não saiu como planejado. O ambiente fica ligeiramente mais hostil.';
 }
 
-module.exports = { generateActionNarrative, generateTurnNarrative, generateCampaignIntro };
+async function generateCustom(prompt) {
+  const res = await client.messages.create({
+    model: 'claude-haiku-4-5-20251001',
+    max_tokens: 1024,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  return res.content[0].text.trim();
+}
+
+module.exports = { generateActionNarrative, generateTurnNarrative, generateCampaignIntro, generateCustom };

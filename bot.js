@@ -86,7 +86,22 @@ function replyIfNotGM(game, sock, msg, commandName) {
   return false;
 }
 
-// ─── Handler de mensagens ────────────────────────────────────────────────────
+async function runCustomCommand(sock, msg, jid, cmd, body) {
+  // Extrai o texto após o keyword
+  const text = body.slice(cmd.keyword.length).trim();
+  if (!text) { await reply(sock, msg, `❌ Use: *${cmd.keyword} [texto]*`); return; }
+
+  const userPrompt = cmd.action_prompt.replace('{{text}}', text);
+  try {
+    const res = await require('./ai/claude').generateCustom(userPrompt);
+    await send(sock, jid, res);
+  } catch (err) {
+    console.error('[CustomCmd] Erro:', err.message);
+    await reply(sock, msg, '❌ Erro ao processar o comando.');
+  }
+}
+
+
 async function handleMessage(sock, msg) {
   const jid = getJid(msg);
   const body = getBody(msg);
@@ -109,6 +124,15 @@ async function handleMessage(sock, msg) {
   const game = games.get(jid);
 
   try {
+
+    // ─── Comandos customizados ────────────────────────────────────────────────
+    const customCmd = db.prepare(
+      'SELECT * FROM custom_commands WHERE lower(?) LIKE lower(keyword) || \'%\' ORDER BY length(keyword) DESC LIMIT 1'
+    ).get(body);
+    if (customCmd && body.toLowerCase().startsWith(customCmd.keyword.toLowerCase())) {
+      await runCustomCommand(sock, msg, jid, customCmd, body);
+      return;
+    }
 
     if (body === '!jid') {
       const campInfo = campaign

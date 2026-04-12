@@ -31,6 +31,14 @@ db.exec(`
     keyword TEXT UNIQUE NOT NULL COLLATE NOCASE
   );
 
+  CREATE TABLE IF NOT EXISTS custom_commands (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    keyword TEXT UNIQUE NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    action_prompt TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS conversations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     jid TEXT NOT NULL,
@@ -51,6 +59,13 @@ db.exec(`
 
 // Migrações (colunas adicionadas em versões posteriores)
 try { db.exec('ALTER TABLE conversations ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id)'); } catch (_) {}
+try { db.exec(`CREATE TABLE IF NOT EXISTS custom_commands (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  keyword TEXT UNIQUE NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  action_prompt TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`); } catch (_) {}
 
 // Corrige JIDs inválidos (sem @) que possam ter sido inseridos por seed incorreto
 db.prepare("UPDATE campaigns SET jid = NULL WHERE jid IS NOT NULL AND jid NOT LIKE '%@%'").run();
@@ -85,5 +100,10 @@ if (triggersCount.n === 0) {
   const insert = db.prepare('INSERT OR IGNORE INTO triggers (keyword) VALUES (?)');
   for (const kw of keywords) insert.run(kw);
 }
+
+// Seed comandos customizados de exemplo
+const cmdInsert = db.prepare('INSERT OR IGNORE INTO custom_commands (keyword, description, action_prompt) VALUES (?, ?, ?)');
+cmdInsert.run('!translateenpt', 'Traduz inglês → português', 'Traduza o texto a seguir do inglês para o português brasileiro. Responda APENAS com a tradução, sem explicações:\n\n{{text}}');
+cmdInsert.run('!translatepten', 'Traduz português → inglês', 'Translate the following text from Brazilian Portuguese to English. Respond ONLY with the translation, no explanations:\n\n{{text}}');
 
 module.exports = { db };
