@@ -60,7 +60,22 @@ async function generateActionNarrative(playerName, action, roll, dc, turn, recen
  * @param {string} lastTurnSummary - Resumo do turno anterior
  * @returns {Promise<string>}
  */
-async function generateTurnNarrative(turn, lastTurnSummary = '', systemPrompt = null) {
+async function generateCampaignIntro(campaignName, systemPrompt) {
+  try {
+    const res = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 500,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: `Apresente a abertura da campanha "${campaignName}" de forma épica e imersiva. Descreva o cenário, o contexto e o que está em jogo. Termine convidando os jogadores a registrarem seus personagens com !personagem [descrição].` }],
+    });
+    return res.content[0].text.trim();
+  } catch (err) {
+    console.error('[Claude] Erro ao gerar intro:', err.message);
+    return null;
+  }
+}
+
+turn, lastTurnSummary = '', systemPrompt = null) {
   const context = lastTurnSummary
     ? `Resumo do turno anterior: ${lastTurnSummary}`
     : 'É o início da missão.';
@@ -92,4 +107,4 @@ function _fallbackNarrative(roll, dc) {
   return 'A ação não saiu como planejado. O ambiente fica ligeiramente mais hostil.';
 }
 
-module.exports = { generateActionNarrative, generateTurnNarrative };
+module.exports = { generateActionNarrative, generateTurnNarrative, generateCampaignIntro };

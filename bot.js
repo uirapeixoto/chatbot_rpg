@@ -1,7 +1,7 @@
 require('dotenv').config();
 const GameManager = require('./gameManager');
 const { rollD20, formatDiceResult } = require('./dice');
-const { generateActionNarrative, generateTurnNarrative } = require('./ai/claude');
+const { generateActionNarrative, generateTurnNarrative, generateCampaignIntro } = require('./ai/claude');
 const { startWhatsApp } = require('./whatsapp/client');
 const { startServer } = require('./api/server');
 const { db } = require('./db/database');
@@ -138,10 +138,19 @@ async function handleMessage(sock, msg) {
     if (body === '!iniciar') {
       if (replyIfNotGM(game, sock, msg, '!iniciar')) return;
       if (game.started) { await send(sock, jid, '⚠️ A campanha já está em andamento! Use *!status* para ver o turno atual.'); return; }
+      if (!campaign) {
+        await reply(sock, msg, '⚠️ Nenhuma campanha vinculada a este grupo. Vincule pelo painel admin ou nomeie o grupo igual ao nome da campanha.');
+        return;
+      }
       game.start();
-      await send(sock, jid, nar.intro);
+      const systemPrompt = [campaign.prompt, campaign.context_data].filter(Boolean).join('\n\n');
+      const intro = await generateCampaignIntro(campaign.name, systemPrompt) || nar.intro;
+      await send(sock, jid, intro);
       await sleep(1500);
-      await send(sock, jid, nar.turn1Opening);
+      const turn1 = await generateTurnNarrative(1, '', systemPrompt);
+      await send(sock, jid,
+        `━━━━━━━━━━━━━━━━━━━━━━\n⏱️ *TURNO 1 — INÍCIO*\n━━━━━━━━━━━━━━━━━━━━━━\n\n🎭 *[MESTRE]:* ${turn1}\n\n_Declarem suas ações com *!acao [descrição]*_`
+      );
       return;
     }
 
