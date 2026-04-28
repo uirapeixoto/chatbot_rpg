@@ -34,6 +34,44 @@ router.delete('/campaigns/:id', (req, res) => {
   res.json({ ok: true });
 });
 
+// ── Settings ──────────────────────────────────────────────────────────────────
+router.get('/settings', (req, res) => {
+  res.json(db.prepare('SELECT key, value, description FROM settings ORDER BY key').all());
+});
+
+router.put('/settings/:key', (req, res) => {
+  const { value } = req.body ?? {};
+  if (value === undefined) return res.status(400).json({ error: 'value obrigatório' });
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value')
+    .run(req.params.key, String(value));
+  res.json({ ok: true });
+});
+
+// ── DC Rules ──────────────────────────────────────────────────────────────────
+router.get('/dc-rules', (req, res) => {
+  res.json(db.prepare('SELECT * FROM dc_rules ORDER BY priority DESC, id ASC').all());
+});
+
+router.post('/dc-rules', (req, res) => {
+  const { pattern, dc, label, priority } = req.body ?? {};
+  if (!pattern || !dc) return res.status(400).json({ error: 'pattern e dc obrigatórios' });
+  const result = db.prepare('INSERT INTO dc_rules (pattern, dc, label, priority) VALUES (?, ?, ?, ?)')
+    .run(pattern, parseInt(dc, 10), label ?? '', parseInt(priority ?? 0, 10));
+  res.status(201).json({ id: result.lastInsertRowid });
+});
+
+router.put('/dc-rules/:id', (req, res) => {
+  const { pattern, dc, label, priority } = req.body ?? {};
+  db.prepare('UPDATE dc_rules SET pattern=?, dc=?, label=?, priority=? WHERE id=?')
+    .run(pattern ?? '', parseInt(dc ?? 12, 10), label ?? '', parseInt(priority ?? 0, 10), req.params.id);
+  res.json({ ok: true });
+});
+
+router.delete('/dc-rules/:id', (req, res) => {
+  db.prepare('DELETE FROM dc_rules WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
 // ── Custom Commands ───────────────────────────────────────────────────────────
 router.get('/commands', (req, res) => {
   res.json(db.prepare('SELECT * FROM custom_commands ORDER BY keyword').all());

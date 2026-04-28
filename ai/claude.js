@@ -1,12 +1,22 @@
 require('dotenv').config();
 const Anthropic = require('@anthropic-ai/sdk');
 const { SYSTEM_PROMPT } = require('./prompt');
+const { db } = require('../db/database');
 
 if (!process.env.ANTHROPIC_API_KEY) {
   throw new Error('ANTHROPIC_API_KEY não definida no arquivo .env');
 }
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+function getSetting(key, fallback) {
+  const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
+  return row ? row.value : fallback;
+}
+
+function getModel() { return getSetting('claude_model', 'claude-haiku-4-5-20251001'); }
+function getMaxTokens() { return parseInt(getSetting('claude_max_tokens', '400'), 10); }
+function getActionMaxTokens() { return parseInt(getSetting('claude_action_max_tokens', '300'), 10); }
 
 /**
  * Gera narração da ação via Claude
@@ -38,8 +48,8 @@ async function generateActionNarrative(playerName, action, roll, dc, turn, recen
 
   try {
     const res = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 300,
+      model: getModel(),
+      max_tokens: getActionMaxTokens(),
       system: systemPrompt || SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
     });
@@ -63,8 +73,8 @@ async function generateActionNarrative(playerName, action, roll, dc, turn, recen
 async function generateCampaignIntro(campaignName, systemPrompt) {
   try {
     const res = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 500,
+      model: getModel(),
+      max_tokens: getMaxTokens(),
       system: systemPrompt,
       messages: [{ role: 'user', content: `Apresente a abertura da campanha "${campaignName}" de forma épica e imersiva. Descreva o cenário, o contexto e o que está em jogo. Termine convidando os jogadores a registrarem seus personagens com !personagem [descrição].` }],
     });
@@ -88,8 +98,8 @@ async function generateTurnNarrative(turn, lastTurnSummary = '', systemPrompt = 
 
   try {
     const res = await client.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 400,
+      model: getModel(),
+      max_tokens: getMaxTokens(),
       system: systemPrompt || SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
     });

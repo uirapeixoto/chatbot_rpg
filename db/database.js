@@ -15,6 +15,20 @@ db.exec(`
     password_hash TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS settings (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS dc_rules (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern  TEXT    NOT NULL,
+    dc       INTEGER NOT NULL CHECK (dc BETWEEN 1 AND 20),
+    label    TEXT    NOT NULL DEFAULT '',
+    priority INTEGER NOT NULL DEFAULT 0
+  );
+
   CREATE TABLE IF NOT EXISTS campaigns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -23,6 +37,8 @@ db.exec(`
     prompt TEXT NOT NULL DEFAULT '',
     context_data TEXT NOT NULL DEFAULT '',
     active INTEGER NOT NULL DEFAULT 1,
+    max_players INTEGER NOT NULL DEFAULT 6,
+    max_turns INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -59,12 +75,22 @@ db.exec(`
 
 // Migrações (colunas adicionadas em versões posteriores)
 try { db.exec('ALTER TABLE conversations ADD COLUMN campaign_id INTEGER REFERENCES campaigns(id)'); } catch (_) {}
+try { db.exec('ALTER TABLE campaigns ADD COLUMN max_players INTEGER NOT NULL DEFAULT 6'); } catch (_) {}
+try { db.exec('ALTER TABLE campaigns ADD COLUMN max_turns INTEGER NOT NULL DEFAULT 0'); } catch (_) {}
 try { db.exec(`CREATE TABLE IF NOT EXISTS custom_commands (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   keyword TEXT UNIQUE NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   action_prompt TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
+)`); } catch (_) {}
+try { db.exec(`CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY, value TEXT NOT NULL, description TEXT NOT NULL DEFAULT ''
+)`); } catch (_) {}
+try { db.exec(`CREATE TABLE IF NOT EXISTS dc_rules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  pattern TEXT NOT NULL, dc INTEGER NOT NULL CHECK (dc BETWEEN 1 AND 20),
+  label TEXT NOT NULL DEFAULT '', priority INTEGER NOT NULL DEFAULT 0
 )`); } catch (_) {}
 
 // Corrige JIDs inválidos (sem @) que possam ter sido inseridos por seed incorreto
@@ -99,6 +125,26 @@ if (triggersCount.n === 0) {
   const keywords = ['!acao', '!mestre', '!iniciar', '!turno', '!personagem', '!d20', '!status', '!ajuda'];
   const insert = db.prepare('INSERT OR IGNORE INTO triggers (keyword) VALUES (?)');
   for (const kw of keywords) insert.run(kw);
+}
+
+// Seed settings globais
+const settingInsert = db.prepare('INSERT OR IGNORE INTO settings (key, value, description) VALUES (?, ?, ?)');
+settingInsert.run('claude_model',      'claude-haiku-4-5-20251001', 'Modelo Claude usado nas narrações');
+settingInsert.run('claude_max_tokens', '400',  'Máximo de tokens por resposta de narração');
+settingInsert.run('claude_action_max_tokens', '300', 'Máximo de tokens por narração de ação');
+settingInsert.run('default_dc',        '12',   'DC padrão quando nenhuma regra bate');
+
+// Seed dc_rules (regras de dificuldade por padrão de texto)
+const dcRulesCount = db.prepare('SELECT COUNT(*) as n FROM dc_rules').get();
+if (dcRulesCount.n === 0) {
+  const dcInsert = db.prepare('INSERT INTO dc_rules (pattern, dc, label, priority) VALUES (?, ?, ?, ?)');
+  dcInsert.run('atirar|disparar|atacar|golpear|cortar|esfaquear|espada|flecha|arco|ferir|lutar', 13, 'Combate', 10);
+  dcInsert.run('esconder|infiltrar|furtivo|silencioso|ocultar|esgueirar', 14, 'Furtividade', 10);
+  dcInsert.run('hackear|invadir|sistema|terminal|dados|encrypt|magia|encantamento|runa|feitiço|arcano|canalizar', 15, 'Hacking/Magia', 10);
+  dcInsert.run('observar|perceber|notar|ouvir|escutar|detectar|procurar', 11, 'Percepção', 10);
+  dcInsert.run('convencer|negociar|blefar|enganar|persuadir', 12, 'Social', 10);
+  dcInsert.run('correr|pular|escalar|fugir|empurrar', 12, 'Atletismo', 10);
+  dcInsert.run('curar|tratar|estabilizar|medikit|ervas|bandagem', 14, 'Medicina', 10);
 }
 
 // Seed comandos customizados de exemplo

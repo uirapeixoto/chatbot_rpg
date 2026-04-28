@@ -181,6 +181,11 @@ async function handleMessage(sock, msg) {
     if (body.startsWith('!personagem ')) {
       const desc = body.replace('!personagem ', '').trim();
       if (!desc) { await reply(sock, msg, '❌ Use: *!personagem [descrição do seu personagem]*'); return; }
+      const maxPlayers = campaign?.max_players || 6;
+      if (!game.getPlayer(senderId) && game.playerCount() >= maxPlayers) {
+        await reply(sock, msg, `🚫 Limite de *${maxPlayers} jogadores* atingido nesta campanha.`);
+        return;
+      }
       game.registerPlayer(senderId, senderName, desc);
       await send(sock, jid,
         `🟢 *${senderName}* entrou na campanha!\n\n` +
@@ -242,6 +247,12 @@ async function handleMessage(sock, msg) {
     if (body === '!turno') {
       if (replyIfNotGM(game, sock, msg, '!turno')) return;
       if (!game.started) { await reply(sock, msg, '⚠️ A campanha ainda não foi iniciada.'); return; }
+      const maxTurns = campaign?.max_turns || 0;
+      if (maxTurns > 0 && game.turn >= maxTurns) {
+        game.end();
+        await send(sock, jid, `🏁 *Turno máximo (${maxTurns}) atingido — campanha encerrada!*\n\n` + nar.outro);
+        return;
+      }
       game.nextTurn();
       const lastTurnSummary = game.actionLog
         .filter(a => a.turn === game.turn - 1)
